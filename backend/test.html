@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Energy Feed Test</title>
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; text-align: center; margin-top: 50px; transition: background-color 0.2s; }
+    .card { border: 2px solid #ddd; padding: 20px; border-radius: 10px; width: 300px; margin: 0 auto; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    h1 { color: #333; }
+    h2 { margin: 10px 0; }
+    #status { font-weight: bold; color: gray; }
+  </style>
+</head>
+<body>
+
+  <h1>⚡ Real-Time Test</h1>
+  <p id="status">🟡 Connecting to Server...</p>
+
+  <div class="card">
+    <h2 style="color: #007bff;">Voltage: <span id="voltage">0.00</span> V</h2>
+    <h2 style="color: #28a745;">Current: <span id="current">0.00</span> A</h2>
+    <h2 style="color: #dc3545;">Power: <span id="power">0.00</span> W</h2>
+  </div>
+
+  <script>
+    const socket = io('http://localhost:3000');
+
+    socket.on('connect', () => {
+      document.getElementById('status').innerText = "🟢 Connected! Waiting for ESP32...";
+      document.getElementById('status').style.color = "green";
+      console.log("Connected to WebSocket Server with ID:", socket.id);
+    });
+
+    socket.on('disconnect', () => {
+      document.getElementById('status').innerText = "🔴 Disconnected from Server";
+      document.getElementById('status').style.color = "red";
+    });
+
+    socket.on('live_power_reading', (data) => {
+      console.log("New live data arrived!", data);
+      document.getElementById('voltage').innerText = data.voltage.toFixed(2);
+      document.getElementById('current').innerText = data.current.toFixed(3);
+      document.getElementById('power').innerText = data.power.toFixed(2);
+      document.body.style.backgroundColor = "#f4fcf4";
+      setTimeout(() => { document.body.style.backgroundColor = "#ffffff"; }, 200);
+    });
+  </script>
+
+</body>
+</html>
