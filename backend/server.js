@@ -32,7 +32,7 @@ const EnergyData = mongoose.model('EnergyData', energySchema);
 
 io.on('connection', (socket) => {
   console.log(`🔌 New client connected to live feed: ${socket.id}`);
-  
+
   socket.on('disconnect', () => {
     console.log(`❌ Client disconnected: ${socket.id}`);
   });
@@ -52,6 +52,21 @@ app.post('/api/energy', async (req, res) => {
   } catch (error) {
     console.error("Error:", error);
     res.status(500).send({ error: "Failed to process data" });
+  }
+});
+
+app.get('/api/energy/history', async (req, res) => {
+  try {
+    // Grab the 20 most recent readings from MongoDB
+    const rawHistory = await EnergyData.find().sort({ timestamp: -1 }).limit(20);
+
+    // Reverse the array so the oldest is on the left and newest is on the right of the chart
+    const chartData = rawHistory.reverse();
+
+    res.status(200).json(chartData);
+  } catch (error) {
+    console.error("Database fetch error:", error);
+    res.status(500).send({ error: "Failed to fetch historical data" });
   }
 });
 

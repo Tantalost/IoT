@@ -1,7 +1,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow-x:hidden}
 
-/* ── DESIGN TOKENS ────────────────────────────────────── */
+/* 1. DEFAULT LIGHT MODE VARIABLES */
 :root{
   --bg:#f7f8fa;
   --surface:#ffffff;
@@ -27,6 +27,26 @@ html,body{height:100%;overflow-x:hidden}
   --shadow-lg:0 20px 60px rgba(0,0,0,0.15),0 0 0 1px rgba(0,0,0,0.05);
   --sidebar-w:230px;
   --mob-bar:58px;
+}
+
+/* 2. DARK MODE OVERRIDES (Placed after so they win the tiebreaker) */
+[data-theme="dark"] {
+  --bg: #0f1117;
+  --surface: #1a1d24;
+  --surface2: #252830;
+  --surface3: #323642;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --text: #ffffff;
+  --text2: #98a0ae;
+  --text3: #6b7280;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+/* 3. SMOOTH TRANSITIONS */
+body, .sidebar, .content, .ap-card, .sum-card, .mob-topbar, .mob-nav {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 body{
