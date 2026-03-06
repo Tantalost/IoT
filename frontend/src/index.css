@@ -521,13 +521,33 @@ tbody tr:hover td{background:var(--bg)}
 }
 
 @media(max-width:768px){
-  /* Completely hide desktop chrome */
-  .sidebar{display:none}
-  .content{display:none}
+  /* 1. THE FIX: Stop Flexbox from putting mobile elements side-by-side */
+  .app {
+    display: block; 
+    width: 100%;
+  }
 
-  /* Show mobile chrome */
-  .mob-topbar{display:flex}
-  .mob-nav{display:flex}
-  .mob-page{display:flex}
-  .mob-page:not(.visible){display:none}
+  /* 2. Completely hide desktop chrome */
+  .sidebar { display: none !important; }
+
+  /* 3. Force mobile chrome to span the full width */
+  .mob-topbar { 
+    display: flex; 
+    width: 100%; 
+  }
+  
+  .mob-nav { 
+    display: flex; 
+    width: 100%; 
+  }
+  
+  .mob-page { 
+    display: flex; 
+    width: 100%; 
+    overflow-x: hidden; /* Prevents horizontal scrolling */
+  }
+  
+  .mob-page:not(.visible) { 
+    display: none; 
+  }
 }
