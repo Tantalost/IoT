@@ -8,13 +8,17 @@
 const char* ssid = "TANTALOS 2489";
 const char* password = "]r06019G";
 
-const char* serverName = "http://192.168.254.113:3000/api/energy"; 
+const char* serverName = "http://192.168.137.1:3000/api/energy"; 
 
-// PZEM Pins
-#define PZEM_RX_PIN 26
-#define PZEM_TX_PIN 25
+// PZEM 1 Pins (Using Hardware Serial 2)
+#define PZEM1_RX_PIN 26
+#define PZEM1_TX_PIN 25
+PZEM004Tv30 pzem1(Serial2, PZEM1_RX_PIN, PZEM1_TX_PIN);
 
-PZEM004Tv30 pzem(Serial2, PZEM_RX_PIN, PZEM_TX_PIN);
+// PZEM 2 Pins (Using Hardware Serial 1)
+#define PZEM2_RX_PIN 16
+#define PZEM2_TX_PIN 17
+PZEM004Tv30 pzem2(Serial1, PZEM2_RX_PIN, PZEM2_TX_PIN);
 
 // Timer variables to avoid using delay()
 unsigned long lastTime = 0;
@@ -36,41 +40,66 @@ void setup() {
 }
 
 void loop() {
-  // Check if it's time to send data and if Wi-Fi is connected
   if ((millis() - lastTime) > timerDelay) {
     if (WiFi.status() == WL_CONNECTED) {
       
-      float voltage = pzem.voltage();
-      float current = pzem.current();
-      float power = pzem.power();
-      float energy = pzem.energy();
+      // Read Sensor 1
+      float v1 = pzem1.voltage();
+      float c1 = pzem1.current();
+      float p1 = pzem1.power();
+      float e1 = pzem1.energy();
 
-      if (isnan(voltage)) {
-        Serial.println("Error reading voltage. Check AC power.");
-      } else {
-        HTTPClient http;
-        http.begin(serverName);
-        http.addHeader("Content-Type", "application/json");
+      // Read Sensor 2
+      float v2 = pzem2.voltage();
+      float c2 = pzem2.current();
+      float p2 = pzem2.power();
+      float e2 = pzem2.energy();
 
-        // Create the JSON payload
-        StaticJsonDocument<200> doc;
-        doc["voltage"] = voltage;
-        doc["current"] = current;
-        doc["power"] = power;
-        doc["energy"] = energy;
+      HTTPClient http;
+      http.begin(serverName);
+      http.addHeader("Content-Type", "application/json");
 
-        String jsonPayload;
-        serializeJson(doc, jsonPayload);
+      // Create a larger JSON document to hold the array (512 bytes is plenty)
+      StaticJsonDocument<512> doc;
+      
+      // Create the "nodes" array
+      JsonArray nodes = doc.createNestedArray("nodes");
 
-        // Send the POST request
-        int httpResponseCode = http.POST(jsonPayload);
+      // --- Append Node 1 Data ---
+      JsonObject node1 = nodes.createNestedObject();
+      node1["id"] = 1;
+      // If sensor is unplugged from AC, isnan() prevents it from sending "null" strings
+      node1["voltage"] = isnan(v1) ? 0 : v1;
+      node1["current"] = isnan(c1) ? 0 : c1;
+      node1["power"] = isnan(p1) ? 0 : p1;
+      node1["energy"] = isnan(e1) ? 0 : e1;
 
-        Serial.print("HTTP Response code: ");
+      // --- Append Node 2 Data ---
+      JsonObject node2 = nodes.createNestedObject();
+      node2["id"] = 2;
+      node2["voltage"] = isnan(v2) ? 0 : v2;
+      node2["current"] = isnan(c2) ? 0 : c2;
+      node2["power"] = isnan(p2) ? 0 : p2;
+      node2["energy"] = isnan(e2) ? 0 : e2;
+
+      String jsonPayload;
+      serializeJson(doc, jsonPayload);
+
+      // Send the POST request
+      int httpResponseCode = http.POST(jsonPayload);
+      if (httpResponseCode > 0) {
+        Serial.print("✅ HTTP Response code: ");
         Serial.println(httpResponseCode);
         Serial.println("Payload: " + jsonPayload);
-
-        http.end(); // Free resources
+      } else {
+        Serial.print("❌ HTTP Request failed. Error code: ");
+        Serial.println(httpResponseCode);
+        // THIS IS THE NEW LOG: It will tell us exactly why it failed!
+        Serial.println("Error details: " + http.errorToString(httpResponseCode)); 
       }
+
+      http.end(); // Free resources
+      
     } else {
       Serial.println("Wi-Fi Disconnected");
     }

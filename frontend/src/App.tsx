@@ -3,16 +3,21 @@ import { io } from 'socket.io-client';
 import WattWatchDashboard from './components/WattWatchDashboard';
 
 // Export this interface so our other files can use the exact same data structure
-export interface EnergyData {
+export interface EnergyNode {
+  id: number;
   voltage: number;
   current: number;
   power: number;
   energy: number;
+}
+
+export interface EnergyData {
+  nodes: EnergyNode[];
   timestamp?: string;
 }
 
 // Connect to the server ONCE at the app level
-const socket = io('http://localhost:3000'); 
+const socket = io('http://192.168.137.1:3000');
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -20,8 +25,13 @@ const App: React.FC = () => {
   const [phpRate, setPhpRate] = useState<number>(12); // Lifted the rate so Settings can change it later!
 
   // --- THE GLOBAL DATA STATE ---
-  const [liveData, setLiveData] = useState<EnergyData>({ voltage: 0, current: 0, power: 0, energy: 0 });
   const [history, setHistory] = useState<EnergyData[]>([]);
+  const [liveData, setLiveData] = useState<EnergyData>({ 
+  nodes: [
+    { id: 1, voltage: 0, current: 0, power: 0, energy: 0 },
+    { id: 2, voltage: 0, current: 0, power: 0, energy: 0 }
+  ] 
+});
 
   useEffect(() => {
     // 1. Theme handler
@@ -31,7 +41,7 @@ const App: React.FC = () => {
     // 2. Initial History Fetch
     const fetchHistory = async () => {
       try {
-        const response = await fetch('http://localhost:3000/api/energy/history');
+        const response = await fetch('http://192.168.137.62:3000/api/energy/history');
         const data = await response.json();
         setHistory(data);
       } catch (error) {
@@ -42,6 +52,9 @@ const App: React.FC = () => {
 
     // 3. Global WebSocket Listener
     socket.on('live_power_reading', (data: EnergyData) => {
+      // --- NEW FRONTEND LOG ---
+      console.log("📥 RECEIVED LIVE DATA FROM BACKEND:", data); 
+      
       setLiveData(data);
       setHistory((prev) => {
         const updated = [...prev, data];
