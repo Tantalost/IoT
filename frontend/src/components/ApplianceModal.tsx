@@ -8,11 +8,21 @@ interface ApplianceModalProps {
 }
 
 const ApplianceTypes = [
+  { label: 'Phone Charger', key: 'phone', icon: '📱' },
+  { label: 'Laptop Charger', key: 'laptop', icon: '💻' },
+  { label: 'Desktop PC', key: 'desktop', icon: '🖥️' },
+  { label: 'Television', key: 'tv', icon: '📺' },
+  { label: 'Electric Fan', key: 'fan', icon: '🌀' },
   { label: 'Air Conditioner', key: 'ac', icon: '❄️' },
   { label: 'Refrigerator', key: 'fridge', icon: '🧊' },
-  { label: 'Electric Fan', key: 'fan', icon: '🌀' },
-  { label: 'Desktop PC', key: 'desktop', icon: '💻' },
   { label: 'Microwave', key: 'microwave', icon: '🍱' },
+  { label: 'Rice Cooker', key: 'rice', icon: '🍚' },
+  { label: 'Coffee Maker', key: 'coffee', icon: '☕' },
+  { label: 'Washing Machine', key: 'washer', icon: '🧺' },
+  { label: 'Hair Dryer', key: 'hairdryer', icon: '💨' },
+  { label: 'Clothes Iron', key: 'iron', icon: '👕' },
+  { label: 'LED Light', key: 'light', icon: '💡' },
+  { label: 'Generic Device', key: 'default', icon: '🔌' },
 ];
 
 const ApplianceModal: React.FC<ApplianceModalProps> = ({ isOpen, slotNumber, onClose, onAdd }) => {

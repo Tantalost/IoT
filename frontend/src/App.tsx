@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import WattWatchDashboard from './components/WattWatchDashboard';
-
-// Export this interface so our other files can use the exact same data structure
+import AppliancesPage from './components/AppliancesPage';
 export interface EnergyNode {
   id: number;
   voltage: number;
@@ -52,7 +51,6 @@ const App: React.FC = () => {
 
     // 3. Global WebSocket Listener
     socket.on('live_power_reading', (data: EnergyData) => {
-      // --- NEW FRONTEND LOG ---
       console.log("📥 RECEIVED LIVE DATA FROM BACKEND:", data); 
       
       setLiveData(data);
@@ -128,9 +126,15 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {activeTab === 'dashboard' ? (
+      {activeTab === 'dashboard' && (
         <WattWatchDashboard liveData={liveData} history={history} phpRate={phpRate} />
-      ) : (
+      )}
+      
+      {activeTab === 'devices' && (
+        <AppliancesPage liveData={liveData} history={history} />
+      )}
+
+      {(activeTab !== 'dashboard' && activeTab !== 'devices') && (
         <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text3)' }}>
           <h2>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module Under Construction 🚧</h2>
         </div>
