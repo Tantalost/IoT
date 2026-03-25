@@ -64,3 +64,8 @@ app.post('/api/energy', async (req, res) => {
     res.status(500).send({ error: "Failed to process data" });
   }
 });
+
+const PORT = 3000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Real-Time Server actively listening on port ${PORT}...`);
+});
