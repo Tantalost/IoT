@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import WattWatchDashboard from './components/WattWatchDashboard';
 import AppliancesPage from './components/AppliancesPage';
+import AnalyticsPage from './components/AnalyticsPage';
 export interface EnergyNode {
   id: number;
   voltage: number;
@@ -89,12 +90,6 @@ const App: React.FC = () => {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Analytics
               </div>
             </div>
-            <div className="nav-sect">
-              <div className="nav-sect-label">System</div>
-              <div className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 19.07l-1.41-1.41M20.49 12H22M2 12h1.51M19.07 19.07l-1.41-1.41M4.93 4.93L3.52 6.34M12 20.49V22M12 2v1.51"/></svg> Settings
-              </div>
-            </div>
           </div>
 
           <div style={{ marginTop: 'auto' }}>
@@ -129,12 +124,13 @@ const App: React.FC = () => {
       {activeTab === 'dashboard' && (
         <WattWatchDashboard liveData={liveData} history={history} phpRate={phpRate} />
       )}
-      
       {activeTab === 'devices' && (
         <AppliancesPage liveData={liveData} history={history} />
       )}
-
-      {(activeTab !== 'dashboard' && activeTab !== 'devices') && (
+      {activeTab === 'analytics' && (
+        <AnalyticsPage liveData={liveData} history={history} phpRate={phpRate} />
+      )}
+      {(activeTab !== 'dashboard' && activeTab !== 'devices' && activeTab !== 'analytics') && (
         <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text3)' }}>
           <h2>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module Under Construction 🚧</h2>
         </div>
@@ -145,7 +141,6 @@ const App: React.FC = () => {
         <button className={`mob-nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg><span>Home</span></button>
         <button className={`mob-nav-btn ${activeTab === 'devices' ? 'active' : ''}`} onClick={() => setActiveTab('devices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg><span>Devices</span></button>
         <button className={`mob-nav-btn ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>Analytics</span></button>
-        <button className={`mob-nav-btn ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 19.07l-1.41-1.41M20.49 12H22M2 12h1.51M19.07 19.07l-1.41-1.41M4.93 4.93L3.52 6.34M12 20.49V22M12 2v1.51"/></svg><span>Settings</span></button>
       </nav>
     </div>
   );

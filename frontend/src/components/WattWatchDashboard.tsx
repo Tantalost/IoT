@@ -43,8 +43,16 @@ const APPLIANCE_SPECS: Record<string, { expectedWatts: number, icon: string }> =
 const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRate }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 768);
   
-  // State to remember what the user named each node
-  const [configuredNodes, setConfiguredNodes] = useState<Record<number, ApplianceConfig>>({});
+  // 🚀 FIX: Load the saved nodes from Local Storage on boot!
+  const [configuredNodes, setConfiguredNodes] = useState<Record<number, ApplianceConfig>>(() => {
+    const saved = localStorage.getItem('wattwatch_dashboard_nodes');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  // 🚀 FIX: Save to Local Storage every time you add or remove an appliance
+  useEffect(() => {
+    localStorage.setItem('wattwatch_dashboard_nodes', JSON.stringify(configuredNodes));
+  }, [configuredNodes]);
   
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
