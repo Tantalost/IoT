@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import { Doughnut, Bar } from 'react-chartjs-2';
+import { Doughnut, Bar, Line } from 'react-chartjs-2';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
@@ -24,6 +24,25 @@ interface SavedDeviceSignature {
   expectedPower: number;
 }
 
+interface TimeComparison {
+  period: string;
+  totalKwh: number;
+  cost: number;
+  peakPower: number;
+  avgPower: number;
+  applianceBreakdown: Record<string, number>;
+}
+
+interface EfficiencyRanking {
+  name: string;
+  type: string;
+  currentPower: number;
+  expectedPower: number;
+  efficiency: number; // 0-100%
+  dailyCost: number;
+  monthlyProjection: number;
+}
+
 const APPLIANCE_SPECS: Record<string, { expectedWatts: number, icon: string }> = {
   phone: { expectedWatts: 30, icon: '📱' },
   laptop: { expectedWatts: 80, icon: '💻' },
@@ -41,10 +60,17 @@ const APPLIANCE_SPECS: Record<string, { expectedWatts: number, icon: string }> =
 const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 1024);
   
-  // 🧠 Load the smart memory so the Analytics page knows what devices are plugged in
+  const [comparisonPeriod, setComparisonPeriod] = useState<'today' | 'week' | 'month'>('today');
+  const [efficiencyRankings, setEfficiencyRankings] = useState<EfficiencyRanking[]>([]);
+  
   const [deviceMemory, setDeviceMemory] = useState<SavedDeviceSignature[]>(() => {
     const saved = localStorage.getItem('wattwatch_fingerprints');
     return saved ? JSON.parse(saved) : [];
+  });
+  
+  const [configuredNodes, setConfiguredNodes] = useState<Record<number, { name: string; type: string }>>(() => {
+    const saved = localStorage.getItem('wattwatch_dashboard_nodes');
+    return saved ? JSON.parse(saved) : {};
   });
 
   useEffect(() => {
@@ -53,7 +79,108 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // --- DATA SANITIZATION ---
+  const calculateEfficiencyRankings = () => {
+    const rankings: EfficiencyRanking[] = [];
+    
+    Object.entries(configuredNodes).forEach(([nodeIdStr, config]) => {
+      const nodeId = parseInt(nodeIdStr);
+      const currentNode = cleanNodes.find(n => n.id === nodeId);
+      
+      if (currentNode && currentNode.power > 0) {
+        const spec = APPLIANCE_SPECS[config.type] || APPLIANCE_SPECS.default;
+        const expectedPower = spec.expectedWatts;
+        const actualPower = currentNode.power;
+        
+        let efficiency = 100;
+        if (actualPower > 0) {
+          const ratio = actualPower / expectedPower;
+          if (ratio > 1.5) efficiency = 50; // Overpowering
+          else if (ratio > 1.25) efficiency = 75; // Slightly high
+          else if (ratio >= 0.75 && ratio <= 1.25) efficiency = 100; // Optimal
+          else if (ratio >= 0.5) efficiency = 85; // Eco mode
+          else efficiency = 70; // Very low power
+        }
+        
+        const dailyKwh = (actualPower / 1000) * 24; // Assuming 24h operation
+        const dailyCost = dailyKwh * phpRate;
+        const monthlyProjection = dailyCost * 30;
+        
+        rankings.push({
+          name: config.name,
+          type: config.type,
+          currentPower: actualPower,
+          expectedPower,
+          efficiency,
+          dailyCost,
+          monthlyProjection
+        });
+      }
+    });
+    
+    rankings.sort((a, b) => a.efficiency - b.efficiency);
+    setEfficiencyRankings(rankings);
+  };
+
+  useEffect(() => {
+    calculateEfficiencyRankings();
+    const interval = setInterval(calculateEfficiencyRankings, 15000); // Update every 15 seconds
+    return () => clearInterval(interval);
+  }, [cleanNodes, configuredNodes, phpRate]);
+
+  const calculateTimeComparisons = (): TimeComparison[] => {
+    const now = Date.now();
+    const comparisons: TimeComparison[] = [];
+    
+    const todayData = history.slice(-10); // Last 10 readings as "today"
+    const yesterdayData = history.slice(-20, -10); // Previous 10 as "yesterday"
+    
+    const calculatePeriodStats = (data: any[], periodName: string): TimeComparison => {
+      const totalKwh = data.reduce((sum, item) => {
+        return sum + (item.nodes || []).reduce((nodeSum: number, node: any) => nodeSum + (node.energy || 0), 0);
+      }, 0) / data.length || 0;
+      
+      const totalPower = data.reduce((sum, item) => {
+        return sum + (item.nodes || []).reduce((nodeSum: number, node: any) => nodeSum + (node.power || 0), 0);
+      }, 0);
+      
+      const peakPower = Math.max(...data.map(item => 
+        Math.max(...(item.nodes || []).map((node: any) => node.power || 0))
+      ));
+      
+      const avgPower = totalPower / (data.length || 1);
+      const cost = totalKwh * phpRate;
+      
+      const applianceBreakdown: Record<string, number> = {};
+      data.forEach(item => {
+        (item.nodes || []).forEach((node: any) => {
+          const config = configuredNodes[node.id];
+          if (config && node.power > 0) {
+            applianceBreakdown[config.name] = (applianceBreakdown[config.name] || 0) + node.power;
+          }
+        });
+      });
+      
+      return {
+        period: periodName,
+        totalKwh,
+        cost,
+        peakPower,
+        avgPower,
+        applianceBreakdown
+      };
+    };
+    
+    if (todayData.length > 0) {
+      comparisons.push(calculatePeriodStats(todayData, 'Today'));
+    }
+    
+    if (yesterdayData.length > 0) {
+      comparisons.push(calculatePeriodStats(yesterdayData, 'Yesterday'));
+    }
+    
+    return comparisons;
+  };
+
   const NOISE_FLOOR_WATTS = 3.0; 
   const cleanNodes = (liveData?.nodes || []).map(node => ({
     ...node,
@@ -64,13 +191,11 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
   const node2 = cleanNodes.find(n => n.id === 2) || { id: 2, power: 0, energy: 0 };
   const activeNodes = cleanNodes.filter(n => n.power > 0);
 
-  // --- FINANCIAL FORECASTING ---
   const totalKwh = node1.energy + node2.energy; 
   const currentCost = totalKwh * phpRate;
   const estimatedDaily = currentCost > 0 ? currentCost * 4 : 0; 
   const estimatedMonthly = estimatedDaily * 30;
 
-  // --- CHART 1: ENERGY DISTRIBUTION (DOUGHNUT) ---
   const distributionData = {
     labels: ['Sensor Node 1', 'Sensor Node 2'],
     datasets: [{
@@ -89,7 +214,6 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
     }
   };
 
-  // --- CHART 2: HISTORICAL USAGE TRENDS (BAR CHART) ---
   const barData = {
     labels: history.map(() => ''),
     datasets: [
@@ -107,14 +231,12 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
     }
   };
 
-  // --- 🧠 CATEGORY-BASED SMART INSIGHTS ENGINE ---
   let insights: Array<{title: string, text: string, type: 'warning' | 'success' | 'info', icon: string}> = [];
 
   if (activeNodes.length === 0) {
     insights.push({ title: 'System Idle', text: 'All monitored outlets are currently empty or devices are completely powered off. Excellent energy conservation!', type: 'success', icon: '💤' });
   } else {
     activeNodes.forEach(node => {
-      // 1. Identify what appliance is plugged in based on its power fingerprint
       const matchedDevice = deviceMemory.find(memory => {
         const difference = Math.abs(memory.expectedPower - node.power);
         const tolerance = Math.max(15, memory.expectedPower * 0.15); // 15% tolerance
@@ -122,27 +244,22 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
       });
 
       if (matchedDevice) {
-        // 2. We know what it is! Get the category baseline specs
         const spec = APPLIANCE_SPECS[matchedDevice.type] || APPLIANCE_SPECS.default;
         const baseline = spec.expectedWatts;
         
-        // 3. Compare real-time draw against the category average
         if (node.power > baseline * 1.25) {
-          // It's pulling 25% MORE than a normal appliance of this type
           insights.push({ 
             title: `Inefficient Draw: ${matchedDevice.name}`, 
             text: `Pulling ${node.power.toFixed(0)}W, which is significantly higher than the typical ${baseline}W for this category. Check the appliance for dirty filters, failing motors, or faults.`, 
             type: 'warning', icon: '⚠️' 
           });
         } else if (node.power >= baseline * 0.75 && node.power <= baseline * 1.25) {
-          // It's right in the sweet spot
           insights.push({ 
             title: `Healthy Operation: ${matchedDevice.name}`, 
             text: `Running at ${node.power.toFixed(0)}W, which perfectly matches the optimal baseline for this category.`, 
             type: 'success', icon: '✅' 
           });
         } else {
-          // It's pulling less than expected (likely Standby or Eco mode)
           insights.push({ 
             title: `Eco/Standby Mode: ${matchedDevice.name}`, 
             text: `Drawing only ${node.power.toFixed(0)}W. It is operating below standard capacity or resting in standby mode.`, 
@@ -150,7 +267,6 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
           });
         }
       } else {
-        // We don't recognize this power signature
         insights.push({ 
           title: `Uncategorized Load (Node ${node.id})`, 
           text: `Drawing ${node.power.toFixed(0)}W. Please identify this device on the Appliances tab so we can analyze its efficiency against category standards.`, 
@@ -160,7 +276,6 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
     });
   }
 
-  // Add a generic cost projection insight if things are getting expensive
   if (estimatedMonthly > 3000) {
     insights.push({ title: 'High Projection Alert', text: `Your current burn rate projects a massive monthly bill of ₱${estimatedMonthly.toFixed(0)}. Consider turning off heavy appliances during peak hours.`, type: 'warning', icon: '💸' });
   }
@@ -169,13 +284,54 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
     <div style={{ background: 'var(--bg)', minHeight: '100vh', padding: '40px 20px', fontFamily: 'system-ui, -apple-system, sans-serif', display: 'flex', justifyContent: 'center' }}>
       <div style={{ width: '100%', maxWidth: '1200px' }}>
         
-        {/* Header */}
         <div style={{ marginBottom: '30px' }}>
           <h1 style={{ fontSize: '28px', fontWeight: 700, color: 'var(--text1)', margin: '0 0 8px 0' }}>Energy Analytics</h1>
-          <p style={{ color: 'var(--text2)', margin: 0, fontSize: '16px' }}>Cost forecasting and consumption breakdowns.</p>
+          <p style={{ color: 'var(--text2)', margin: 0, fontSize: '16px' }}>Cost forecasting, consumption breakdowns, and efficiency comparisons.</p>
         </div>
 
-        {/* Top Row: Financial Forecast */}
+        <div style={{ marginBottom: '30px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--text1)' }}>Consumption Comparison</h3>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {['today', 'week', 'month'].map(period => (
+                <button
+                  key={period}
+                  onClick={() => setComparisonPeriod(period as any)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: comparisonPeriod === period ? '1px solid var(--primary)' : '1px solid var(--border)',
+                    background: comparisonPeriod === period ? 'var(--primary)' : 'var(--surface)',
+                    color: comparisonPeriod === period ? 'white' : 'var(--text1)',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textTransform: 'capitalize'
+                  }}
+                >
+                  {period === 'today' ? 'Today vs Yesterday' : period === 'week' ? 'This Week vs Last Week' : 'This Month vs Last Month'}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: '16px' }}>
+            {calculateTimeComparisons().map((comparison, idx) => (
+              <div key={idx} className="fadein" style={{ background: 'var(--surface)', padding: '20px', borderRadius: '16px', border: '1px solid var(--border)' }}>
+                <div style={{ color: 'var(--text2)', fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>{comparison.period}</div>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text1)', marginBottom: '12px' }}>
+                  {comparison.totalKwh.toFixed(3)} <span style={{ fontSize: '14px', color: 'var(--text3)' }}>kWh</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text2)' }}>Cost: <span style={{ color: 'var(--text1)', fontWeight: 600 }}>₱{comparison.cost.toFixed(2)}</span></div>
+                  <div style={{ fontSize: '13px', color: 'var(--text2)' }}>Peak: <span style={{ color: 'var(--text1)', fontWeight: 600 }}>{comparison.peakPower.toFixed(0)}W</span></div>
+                  <div style={{ fontSize: '13px', color: 'var(--text2)' }}>Average: <span style={{ color: 'var(--text1)', fontWeight: 600 }}>{comparison.avgPower.toFixed(0)}W</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '20px', marginBottom: '30px' }}>
           <div className="fadein" style={{ background: 'var(--surface)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border)' }}>
             <div style={{ color: 'var(--text2)', fontSize: '14px', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}><span>⏱️</span> CURRENT SESSION</div>
@@ -194,10 +350,8 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
           </div>
         </div>
 
-        {/* Middle Row: Charts & Insights */}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: '30px' }}>
           
-          {/* Left: Distribution & Insights */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
             <div className="fadein" style={{ background: 'var(--surface)', padding: '30px', borderRadius: '20px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', color: 'var(--text1)', width: '100%' }}>Total Consumption Share</h3>
@@ -210,7 +364,37 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
               </div>
             </div>
 
-            {/* Smart Insights Engine */}
+            <div className="fadein" style={{ background: 'var(--surface)', padding: '24px', borderRadius: '20px', border: '1px solid var(--border)' }}>
+              <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: 'var(--text1)', display: 'flex', alignItems: 'center', gap: '8px' }}><span>⚡</span> Efficiency Rankings</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {efficiencyRankings.length === 0 ? (
+                  <div style={{ color: 'var(--text3)', fontSize: '14px', textAlign: 'center', padding: '20px' }}>
+                    No active appliances to rank
+                  </div>
+                ) : (
+                  efficiencyRankings.map((ranking, idx) => (
+                    <div key={idx} style={{ 
+                      padding: '12px', borderRadius: '8px', background: 'var(--bg)', 
+                      borderLeft: `4px solid ${ranking.efficiency >= 90 ? '#10b981' : ranking.efficiency >= 70 ? '#f59e0b' : '#ef4444'}` 
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--text1)', fontSize: '14px' }}>{ranking.name}</div>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: ranking.efficiency >= 90 ? '#10b981' : ranking.efficiency >= 70 ? '#f59e0b' : '#ef4444' }}>
+                          {ranking.efficiency}%
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px', color: 'var(--text2)' }}>
+                        <div>Actual: {ranking.currentPower.toFixed(0)}W</div>
+                        <div>Expected: {ranking.expectedPower}W</div>
+                        <div>Daily: ₱{ranking.dailyCost.toFixed(2)}</div>
+                        <div>Monthly: ₱{ranking.monthlyProjection.toFixed(0)}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
             <div className="fadein" style={{ background: 'var(--surface)', padding: '24px', borderRadius: '20px', border: '1px solid var(--border)' }}>
               <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: 'var(--text1)', display: 'flex', alignItems: 'center', gap: '8px' }}><span>🧠</span> Smart Insights</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -229,7 +413,6 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
             </div>
           </div>
 
-          {/* Right: Trend Chart */}
           <div className="fadein" style={{ background: 'var(--surface)', padding: '30px', borderRadius: '20px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text1)' }}>Load Stacking Analysis</h3>

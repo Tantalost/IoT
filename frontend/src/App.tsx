@@ -23,6 +23,16 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isDark, setIsDark] = useState<boolean>(() => localStorage.getItem('theme') === 'dark');
   const [phpRate, setPhpRate] = useState<number>(12); // Lifted the rate so Settings can change it later!
+  
+  // 🚀 NEW: High consumption alert settings
+  const [alertThreshold, setAlertThreshold] = useState<number>(() => {
+    const saved = localStorage.getItem('wattwatch_alert_threshold');
+    return saved ? parseFloat(saved) : 1000; // Default 1000W
+  });
+  const [alertsEnabled, setAlertsEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('wattwatch_alerts_enabled');
+    return saved !== null ? saved === 'true' : true; // Default enabled
+  });
 
   // --- THE GLOBAL DATA STATE ---
   const [history, setHistory] = useState<EnergyData[]>([]);
@@ -37,6 +47,10 @@ const App: React.FC = () => {
     // 1. Theme handler
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
+
+    // 🚀 NEW: Save alert settings
+    localStorage.setItem('wattwatch_alert_threshold', alertThreshold.toString());
+    localStorage.setItem('wattwatch_alerts_enabled', alertsEnabled.toString());
 
     // 2. Initial History Fetch
     const fetchHistory = async () => {
@@ -65,7 +79,7 @@ const App: React.FC = () => {
     return () => {
       socket.off('live_power_reading');
     };
-  }, [isDark]); // Re-run theme logic if isDark changes
+  }, [isDark, alertThreshold, alertsEnabled]); // Re-run when settings change
 
   return (
     <div className="app">
@@ -122,7 +136,13 @@ const App: React.FC = () => {
       </header>
 
       {activeTab === 'dashboard' && (
-        <WattWatchDashboard liveData={liveData} history={history} phpRate={phpRate} />
+        <WattWatchDashboard 
+          liveData={liveData} 
+          history={history} 
+          phpRate={phpRate} 
+          alertThreshold={alertThreshold}
+          alertsEnabled={alertsEnabled}
+        />
       )}
       {activeTab === 'devices' && (
         <AppliancesPage liveData={liveData} history={history} />

@@ -4,6 +4,17 @@ import { Line } from 'react-chartjs-2';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler);
 
+interface NodeDiagnostics {
+  nodeId: number;
+  connectionUptime: number; // percentage in last hour
+  disconnectCount: number;
+  avgVoltage: number;
+  voltageStability: number; // 0-100 score
+  signalQuality: number; // 0-100 score
+  lastDataAge: number; // milliseconds since last data
+  dataConsistency: number; // 0-100 score
+}
+
 interface EnergyNode {
   id: number;
   voltage: number;
@@ -20,25 +31,106 @@ interface AppliancesProps {
 const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 1024);
 
+  const [diagnostics, setDiagnostics] = useState<Record<number, NodeDiagnostics>>(() => {
+    const initial: Record<number, NodeDiagnostics> = {
+      1: {
+        nodeId: 1,
+        connectionUptime: 100,
+        disconnectCount: 0,
+        avgVoltage: 220,
+        voltageStability: 95,
+        signalQuality: 98,
+        lastDataAge: 0,
+        dataConsistency: 100
+      },
+      2: {
+        nodeId: 2,
+        connectionUptime: 100,
+        disconnectCount: 0,
+        avgVoltage: 220,
+        voltageStability: 95,
+        signalQuality: 98,
+        lastDataAge: 0,
+        dataConsistency: 100
+      }
+    };
+    return initial;
+  });
+
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 1024);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // --- DATA SANITIZATION (Noise Floor) ---
-  const NOISE_FLOOR_WATTS = 3.0; 
+  useEffect(() => {
+    const calculateDiagnostics = () => {
+      const currentTime = Date.now();
+      const oneHourAgo = currentTime - (60 * 60 * 1000);
+
+      const recentHistory = history.filter(item => {
+        const timestamp = item.timestamp ? new Date(item.timestamp).getTime() : 0;
+        return timestamp >= oneHourAgo;
+      });
+
+      [1, 2].forEach(nodeId => {
+        const nodeHistory = recentHistory.map(item => {
+          const node = (item.nodes || []).find(n => n.id === nodeId);
+          return node || { id: nodeId, voltage: 0, current: 0, power: 0, energy: 0 };
+        });
+
+        const currentNode = cleanNodes.find(n => n.id === nodeId);
+
+        const activeReadings = nodeHistory.filter(n => n.power > 0).length;
+        const connectionUptime = nodeHistory.length > 0 ? (activeReadings / nodeHistory.length) * 100 : 0;
+
+        const voltages = nodeHistory.map(n => n.voltage).filter(v => v > 0);
+        const avgVoltage = voltages.length > 0 ? voltages.reduce((sum, v) => sum + v, 0) / voltages.length : 220;
+        const variance = voltages.length > 0 ? voltages.reduce((sum, v) => sum + Math.pow(v - avgVoltage, 2), 0) / voltages.length : 0;
+        const voltageStability = Math.max(0, 100 - (Math.sqrt(variance) / avgVoltage * 100));
+
+        const expectedReadings = 60; // Expected readings per hour
+        const actualReadings = nodeHistory.length;
+        const signalQuality = Math.min(100, (actualReadings / expectedReadings) * 100);
+
+        const powers = nodeHistory.map(n => n.power);
+        const avgPower = powers.reduce((sum, p) => sum + p, 0) / powers.length;
+        const outliers = powers.filter(p => Math.abs(p - avgPower) > avgPower * 2).length;
+        const dataConsistency = Math.max(0, 100 - (outliers / powers.length * 100));
+
+        const lastDataAge = currentNode ? currentTime - (currentTime % 5000) : 30000; // Assume 5s interval
+
+        setDiagnostics(prev => ({
+          ...prev,
+          [nodeId]: {
+            nodeId,
+            connectionUptime: Math.round(connectionUptime),
+            disconnectCount: prev[nodeId].disconnectCount + (currentNode && currentNode.power === 0 && prev[nodeId].connectionUptime > 50 ? 1 : 0),
+            avgVoltage: Math.round(avgVoltage * 10) / 10,
+            voltageStability: Math.round(voltageStability),
+            signalQuality: Math.round(signalQuality),
+            lastDataAge,
+            dataConsistency: Math.round(dataConsistency)
+          }
+        }));
+      });
+    };
+
+    calculateDiagnostics();
+    const interval = setInterval(calculateDiagnostics, 10000); // Update every 10 seconds
+    return () => clearInterval(interval);
+  }, [history, cleanNodes]);
+
+  const NOISE_FLOOR_WATTS = 3.0;
   const cleanNodes = (liveData?.nodes || []).map(node => ({
     ...node,
     power: node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
     current: node.power < NOISE_FLOOR_WATTS ? 0 : node.current
   }));
 
-  // Extract exactly Node 1 and Node 2
   const node1 = cleanNodes.find(n => n.id === 1) || { id: 1, voltage: 0, current: 0, power: 0, energy: 0 };
   const node2 = cleanNodes.find(n => n.id === 2) || { id: 2, voltage: 0, current: 0, power: 0, energy: 0 };
 
-  // --- HELPER TO BUILD INDIVIDUAL CHARTS ---
   const createChartConfig = (nodeId: number, colorHex: string, rgbaFill: string) => {
     const nodeHistory = history.map(item => {
       const targetNode = (item.nodes || []).find(n => n.id === nodeId);
@@ -74,14 +166,33 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
   const chart1 = createChartConfig(1, '#3b82f6', 'rgba(59, 130, 246, 0.15)'); // Blue theme
   const chart2 = createChartConfig(2, '#10b981', 'rgba(16, 185, 129, 0.15)'); // Green theme
 
-  // --- REUSABLE SENSOR CARD COMPONENT ---
   const SensorCard = ({ node, chart, title, themeColor }: { node: EnergyNode, chart: any, title: string, themeColor: string }) => {
     const isActive = node.power > 0;
-    
+    const diagnostic = diagnostics[node.id];
+
+    const healthScore = Math.round((
+      diagnostic.connectionUptime * 0.3 +
+      diagnostic.voltageStability * 0.25 +
+      diagnostic.signalQuality * 0.25 +
+      diagnostic.dataConsistency * 0.2
+    ));
+
+    const getHealthColor = (score: number) => {
+      if (score >= 90) return '#10b981'; // Green
+      if (score >= 70) return '#f59e0b'; // Yellow
+      return '#ef4444'; // Red
+    };
+
+    const getHealthLabel = (score: number) => {
+      if (score >= 90) return 'Excellent';
+      if (score >= 70) return 'Good';
+      if (score >= 50) return 'Fair';
+      return 'Poor';
+    };
+
     return (
       <div className="fadein" style={{ background: 'var(--surface)', borderRadius: '20px', padding: '30px', border: '1px solid var(--border)', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', gap: '24px' }}>
         
-        {/* Card Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
@@ -90,12 +201,24 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
             </div>
             <p style={{ margin: 0, color: 'var(--text3)', fontSize: '14px' }}>Hardware ID: PZEM-004T-{node.id}</p>
           </div>
-          <div style={{ background: isActive ? `${themeColor}15` : 'var(--surface2)', color: isActive ? themeColor : 'var(--text3)', padding: '6px 12px', borderRadius: '100px', fontSize: '13px', fontWeight: 600 }}>
-            {isActive ? 'Drawing Power' : 'Standby'}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+            <div style={{ background: isActive ? `${themeColor}15` : 'var(--surface2)', color: isActive ? themeColor : 'var(--text3)', padding: '6px 12px', borderRadius: '100px', fontSize: '13px', fontWeight: 600 }}>
+              {isActive ? 'Drawing Power' : 'Standby'}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ 
+                width: '8px', 
+                height: '8px', 
+                borderRadius: '50%', 
+                backgroundColor: getHealthColor(healthScore)
+              }}></div>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: getHealthColor(healthScore) }}>
+                {getHealthLabel(healthScore)} ({healthScore}%)
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* 2x2 Detailed Metrics Grid */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
           <div style={{ background: 'var(--bg)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
             <div style={{ color: 'var(--text2)', fontSize: '13px', marginBottom: '4px', fontWeight: 600 }}>LIVE POWER</div>
@@ -115,11 +238,40 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
           </div>
         </div>
 
-        {/* Individual Power Graph */}
         <div>
           <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text2)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Power Draw History</h3>
           <div style={{ height: '220px', width: '100%', border: '1px solid var(--border)', borderRadius: '12px', padding: '10px', background: 'var(--bg)' }}>
             <Line data={chart.data} options={chart.options as any} />
+          </div>
+        </div>
+
+        <div>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text2)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Hardware Diagnostics</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>CONNECTION UPTIME</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: diagnostic.connectionUptime > 80 ? '#10b981' : diagnostic.connectionUptime > 50 ? '#f59e0b' : '#ef4444' }}>
+                {diagnostic.connectionUptime}% <span style={{ fontSize: '12px', color: 'var(--text3)' }}>(last hour)</span>
+              </div>
+            </div>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>VOLTAGE STABILITY</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: diagnostic.voltageStability > 80 ? '#10b981' : diagnostic.voltageStability > 60 ? '#f59e0b' : '#ef4444' }}>
+                {diagnostic.voltageStability}% <span style={{ fontSize: '12px', color: 'var(--text3)' }}>(±{Math.round(220 - diagnostic.avgVoltage)}V)</span>
+              </div>
+            </div>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>SIGNAL QUALITY</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: diagnostic.signalQuality > 80 ? '#10b981' : diagnostic.signalQuality > 60 ? '#f59e0b' : '#ef4444' }}>
+                {diagnostic.signalQuality}% <span style={{ fontSize: '12px', color: 'var(--text3)' }}>({diagnostic.disconnectCount} disconnects)</span>
+              </div>
+            </div>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>DATA CONSISTENCY</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: diagnostic.dataConsistency > 80 ? '#10b981' : diagnostic.dataConsistency > 60 ? '#f59e0b' : '#ef4444' }}>
+                {diagnostic.dataConsistency}% <span style={{ fontSize: '12px', color: 'var(--text3)' }}>stable</span>
+              </div>
+            </div>
           </div>
         </div>
 
