@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import ApplianceModal from './ApplianceModal';
@@ -25,6 +25,7 @@ interface DashboardProps {
   phpRate: number;
   alertThreshold: number;
   alertsEnabled: boolean;
+  apiBaseUrl: string;
 }
 
 interface ApplianceConfig {
@@ -42,6 +43,7 @@ interface ConnectionState {
 
 // Smart Dictionary: Expected maximum wattage for different types to calculate usage percentages
 const APPLIANCE_SPECS: Record<string, { expectedWatts: number, icon: string }> = {
+  charger: { expectedWatts: 20, icon: '🔌' },
   ac: { expectedWatts: 1500, icon: '❄️' },
   fridge: { expectedWatts: 400, icon: '🧊' },
   fan: { expectedWatts: 70, icon: '🌀' },
@@ -50,7 +52,7 @@ const APPLIANCE_SPECS: Record<string, { expectedWatts: number, icon: string }> =
   default: { expectedWatts: 1000, icon: '🔌' }
 };
 
-const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRate, alertThreshold, alertsEnabled }) => {
+const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRate, alertThreshold, alertsEnabled, apiBaseUrl }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 768);
   
   // 🚀 NEW: Alert system state
@@ -72,24 +74,24 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
     return saved ? JSON.parse(saved) : {};
   });
 
-  // 🚀 NEW: Track connection states for each node
-  const [connectionStates, setConnectionStates] = useState<Record<number, ConnectionState>>(() => {
-    const saved = localStorage.getItem('wattwatch_connection_states');
-    return saved ? JSON.parse(saved) : {};
-  });
+  // Track connection states in memory to avoid stale localStorage delays.
+  const [, setConnectionStates] = useState<Record<number, ConnectionState>>({});
 
   // 🚀 NEW: Track nodes that need re-identification
   const [nodesNeedingReID, setNodesNeedingReID] = useState<Set<number>>(new Set());
+
+  const setsEqual = (a: Set<number>, b: Set<number>) => {
+    if (a.size !== b.size) return false;
+    for (const value of a) {
+      if (!b.has(value)) return false;
+    }
+    return true;
+  };
 
   // 🚀 FIX: Save to Local Storage every time you add or remove an appliance
   useEffect(() => {
     localStorage.setItem('wattwatch_dashboard_nodes', JSON.stringify(configuredNodes));
   }, [configuredNodes]);
-
-  // 🚀 NEW: Save connection states to Local Storage
-  useEffect(() => {
-    localStorage.setItem('wattwatch_connection_states', JSON.stringify(connectionStates));
-  }, [connectionStates]);
 
   // 🚀 NEW: Save alert history to Local Storage
   useEffect(() => {
@@ -99,33 +101,40 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
   // --- 1. APPLY THE NOISE FLOOR (Clean the Ghost Data) ---
   const NOISE_FLOOR_WATTS = 3.0; // Ignore any ghost readings under 3 Watts
 
-  const cleanNodes = (liveData?.nodes || []).map(node => ({
-    ...node,
-    // If power is below the noise floor, force power and current to exactly 0
-    power: node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
-    current: node.power < NOISE_FLOOR_WATTS ? 0 : node.current
-  }));
+  const cleanNodes = useMemo(() => (
+    (liveData?.nodes || []).map(node => ({
+      ...node,
+      // If power is below the noise floor, force power and current to exactly 0
+      power: node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
+      current: node.power < NOISE_FLOOR_WATTS ? 0 : node.current
+    }))
+  ), [liveData]);
 
   // 🚀 NEW: High consumption alert monitoring
   useEffect(() => {
-    if (!alertsEnabled) return;
+    if (!alertsEnabled) {
+      setActiveAlerts(prev => (prev.size ? new Set() : prev));
+      return;
+    }
 
     const currentTime = Date.now();
     const ALERT_COOLDOWN = 30000; // 30 seconds between alerts for same node
+    const nextActiveAlerts = new Set<number>();
 
     cleanNodes.forEach(node => {
       if (node.power >= alertThreshold) {
+        nextActiveAlerts.add(node.id);
         const config = configuredNodes[node.id];
         const nodeName = config?.name || `Slot ${node.id}`;
-        
-        // Check if we recently alerted for this node
-        const lastAlert = alertHistory
-          .filter(alert => alert.nodeId === node.id && !alert.acknowledged)
-          .sort((a, b) => b.timestamp - a.timestamp)[0];
-        
-        const timeSinceLastAlert = lastAlert ? currentTime - lastAlert.timestamp : Infinity;
-        
-        if (timeSinceLastAlert > ALERT_COOLDOWN) {
+        setAlertHistory(prev => {
+          // Check if we recently alerted for this node
+          const lastAlert = prev
+            .filter(alert => alert.nodeId === node.id && !alert.acknowledged)
+            .sort((a, b) => b.timestamp - a.timestamp)[0];
+
+          const timeSinceLastAlert = lastAlert ? currentTime - lastAlert.timestamp : Infinity;
+          if (timeSinceLastAlert <= ALERT_COOLDOWN) return prev;
+
           // Trigger new alert
           const newAlert = {
             nodeId: node.id,
@@ -134,110 +143,84 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
             timestamp: currentTime,
             acknowledged: false
           };
-          
-          setAlertHistory(prev => [...prev, newAlert]);
-          setActiveAlerts(prev => new Set(prev).add(node.id));
-          
           console.log(`🚨 HIGH CONSUMPTION ALERT: ${nodeName} drawing ${node.power.toFixed(1)}W (threshold: ${alertThreshold}W)`);
-          
-          // Auto-remove alert after 10 seconds if not acknowledged
-          setTimeout(() => {
-            setActiveAlerts(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(node.id);
-              return newSet;
-            });
-          }, 10000);
-        }
-      } else {
-        // Remove from active alerts if power dropped below threshold
-        setActiveAlerts(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(node.id);
-          return newSet;
+          return [...prev, newAlert];
         });
       }
     });
-  }, [cleanNodes, alertThreshold, alertsEnabled, configuredNodes, alertHistory]);
+
+    setActiveAlerts(prev => (setsEqual(prev, nextActiveAlerts) ? prev : nextActiveAlerts));
+  }, [cleanNodes, alertThreshold, alertsEnabled, configuredNodes]);
 
   // 🚀 NEW: Detect device connections/disconnections
   useEffect(() => {
     const currentTime = Date.now();
     const POWER_CHANGE_THRESHOLD = 0.5; // 50% change indicates new device
-    const MIN_POWER_THRESHOLD = 5.0; // Minimum power to consider a device "connected"
-    const DISCONNECT_TIMEOUT = 10000; // 10 seconds without power = disconnected
+    const MIN_POWER_THRESHOLD = 1.5; // Faster low-load detection (chargers)
 
-    const nodesForConnectionCheck = cleanNodes;
+    setConnectionStates(prevStates => {
+      let changed = false;
+      const nextStates = { ...prevStates };
 
-    nodesForConnectionCheck.forEach(node => {
-      const nodeId = node.id;
-      const currentPower = node.power;
-      const previousState = connectionStates[nodeId];
+      cleanNodes.forEach(node => {
+        const nodeId = node.id;
+        const currentPower = node.power;
+        const previousState = prevStates[nodeId];
 
-      if (!previousState) {
-        // First time seeing this node
-        setConnectionStates(prev => ({
-          ...prev,
-          [nodeId]: {
+        if (!previousState) {
+          changed = true;
+          nextStates[nodeId] = {
             isConnected: currentPower > MIN_POWER_THRESHOLD,
             lastPower: currentPower,
             lastTimestamp: currentTime
-          }
-        }));
-        return;
-      }
+          };
+          return;
+        }
 
-      const timeSinceLastSeen = currentTime - previousState.lastTimestamp;
-      const wasConnected = previousState.isConnected;
-      const isNowConnected = currentPower > MIN_POWER_THRESHOLD;
-      const powerRatio = previousState.lastPower > 0 ? currentPower / previousState.lastPower : 0;
+        const wasConnected = previousState.isConnected;
+        const isNowConnected = currentPower > MIN_POWER_THRESHOLD;
+        const powerRatio = previousState.lastPower > 0 ? currentPower / previousState.lastPower : 0;
 
-      // Check for disconnection (no power for timeout period)
-      if (wasConnected && timeSinceLastSeen > DISCONNECT_TIMEOUT && !isNowConnected) {
-        console.log(`🔌 Node ${nodeId} disconnected`);
-        setConnectionStates(prev => ({
-          ...prev,
-          [nodeId]: {
-            isConnected: false,
-            lastPower: currentPower,
-            lastTimestamp: currentTime
-          }
-        }));
-        return;
-      }
-
-      // Check for new connection or significant power change
-      if (!wasConnected && isNowConnected) {
-        console.log(`⚡ Node ${nodeId} connected with ${currentPower.toFixed(1)}W`);
-        setConnectionStates(prev => ({
-          ...prev,
-          [nodeId]: {
+        // Check for new connection or significant power change
+        if (!wasConnected && isNowConnected) {
+          console.log(`⚡ Node ${nodeId} connected with ${currentPower.toFixed(1)}W`);
+          changed = true;
+          nextStates[nodeId] = {
             isConnected: true,
             lastPower: currentPower,
             lastTimestamp: currentTime
-          }
-        }));
+          };
 
-        // If this node was previously configured, check if it might be a different device
-        if (configuredNodes[nodeId]) {
-          const significantPowerChange = powerRatio < (1 - POWER_CHANGE_THRESHOLD) || powerRatio > (1 + POWER_CHANGE_THRESHOLD);
-          if (significantPowerChange) {
-            console.log(`🤔 Node ${nodeId} power changed significantly, requesting re-identification`);
-            setNodesNeedingReID(prev => new Set(prev).add(nodeId));
+          // If this node was previously configured, check if it might be a different device
+          if (configuredNodes[nodeId]) {
+            const significantPowerChange = powerRatio < (1 - POWER_CHANGE_THRESHOLD) || powerRatio > (1 + POWER_CHANGE_THRESHOLD);
+            if (significantPowerChange) {
+              console.log(`🤔 Node ${nodeId} power changed significantly, requesting re-identification`);
+              setNodesNeedingReID(prev => {
+                if (prev.has(nodeId)) return prev;
+                const next = new Set(prev);
+                next.add(nodeId);
+                return next;
+              });
+            }
           }
+          return;
         }
-      } else if (wasConnected && isNowConnected) {
-        // Update timestamp for connected device
-        setConnectionStates(prev => ({
-          ...prev,
-          [nodeId]: {
-            ...prev[nodeId],
+
+        // Update state when power or connection status changed
+        if (wasConnected !== isNowConnected || previousState.lastPower !== currentPower || previousState.lastTimestamp !== currentTime) {
+          changed = true;
+          nextStates[nodeId] = {
+            isConnected: isNowConnected,
+            lastPower: currentPower,
             lastTimestamp: currentTime
-          }
-        }));
-      }
+          };
+        }
+      });
+
+      return changed ? nextStates : prevStates;
     });
-  }, [liveData, configuredNodes, connectionStates]);
+  }, [cleanNodes, configuredNodes]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
@@ -252,19 +235,33 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
 
   const handleAddAppliance = (name: string, type: string) => {
     if (selectedSlot !== null) {
+      const slot = selectedSlot;
       setConfiguredNodes(prev => ({
         ...prev,
-        [selectedSlot]: {
+        [slot]: {
           name,
           type,
-          lastSeenPower: (liveData?.nodes || []).find(n => n.id === selectedSlot)?.power || 0,
+          lastSeenPower: (liveData?.nodes || []).find(n => n.id === slot)?.power || 0,
           lastSeenTimestamp: Date.now()
         }
       }));
+
+      // Persist dashboard-appliance assignment to backend so other pages resolve names.
+      fetch(`${apiBaseUrl}/api/appliances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outlet_id: slot,
+          appliance_name: name,
+          appliance_type: type,
+          standard_wattage: APPLIANCE_SPECS[type]?.expectedWatts || APPLIANCE_SPECS.default.expectedWatts
+        })
+      }).catch((error) => console.error('Failed to save appliance to backend:', error));
+
       // Remove from re-identification list if it was there
       setNodesNeedingReID(prev => {
         const newSet = new Set(prev);
-        newSet.delete(selectedSlot);
+        newSet.delete(slot);
         return newSet;
       });
     }
@@ -284,21 +281,6 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
       newSet.delete(slotId);
       return newSet;
     });
-  };
-
-  // 🚀 NEW: Handle alert acknowledgment
-  const handleAcknowledgeAlert = (nodeId: number) => {
-    setActiveAlerts(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(nodeId);
-      return newSet;
-    });
-    
-    setAlertHistory(prev => prev.map(alert => 
-      alert.nodeId === nodeId && !alert.acknowledged 
-        ? { ...alert, acknowledged: true }
-        : alert
-    ));
   };
 
   // 🚀 NEW: Handle device re-confirmation
@@ -373,7 +355,7 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
       <div className="mob-page visible" id="page-dashboard">
         <div className="mob-sum-grid">
           <div className="mob-sum-card fadein"><div className="mob-sum-row"><div className="mob-sum-ico ico-g">⚡</div><div className="mob-sum-lbl">Total Power</div></div><div className="mob-sum-val g">{totalPower.toFixed(0)}</div><div className="mob-sum-unit">Watts combined</div></div>
-          <div className="mob-sum-card fadein"><div className="mob-sum-row"><div className="mob-sum-ico ico-a">💰</div><div className="mob-sum-lbl">Cost</div></div><div className="mob-sum-val a">₱{dailyCost}</div><div className="mob-sum-unit">Est. today</div></div>
+          <div className="mob-sum-card fadein"><div className="mob-sum-row"><div className="mob-sum-ico ico-a">💰</div><div className="mob-sum-lbl">Session Cost</div></div><div className="mob-sum-val a">₱{dailyCost}</div><div className="mob-sum-unit">Current kWh × rate</div></div>
           <div className="mob-sum-card fadein"><div className="mob-sum-row"><div className="mob-sum-ico ico-s">📊</div><div className="mob-sum-lbl">Usage</div></div><div className="mob-sum-val">{totalEnergy.toFixed(2)}</div><div className="mob-sum-unit">kWh today</div></div>
           <div className="mob-sum-card fadein"><div className="mob-sum-row"><div className="mob-sum-ico ico-b">🔌</div><div className="mob-sum-lbl">Voltage</div></div><div className="mob-sum-val">{avgVoltage.toFixed(1)}</div><div className="mob-sum-unit">Volts avg</div></div>
         </div>
@@ -408,7 +390,6 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
 
               // IF CONFIGURED: Calculate logic against its type
               const spec = APPLIANCE_SPECS[config.type] || APPLIANCE_SPECS.default;
-              const usagePercent = Math.min((node.power / spec.expectedWatts) * 100, 100);
               const isOverload = node.power > (spec.expectedWatts * 1.3); // 30% over expected limit
 
               return (
@@ -451,12 +432,12 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
   // ════════════════════════════════════════════════════════════
   return (
     <div className="content">
-      <div className="topbar"><div><div className="page-title">Energy Dashboard</div><div className="page-sub">Reactive Sensor Network Active</div></div><div className="live-pill"><div className="pulse"></div> Live · Connected</div></div>
+      <div className="topbar"><div><div className="page-title">Energy Dashboard</div><div className="page-sub">Reactive Sensor Network Active</div></div><div className="live-pill"><div className="pulse"></div> Live · Connected{activeAlerts.size > 0 ? ` · ${activeAlerts.size} Alert${activeAlerts.size > 1 ? 's' : ''}` : ''}</div></div>
 
       <div className="sum-grid">
         <div className="sum-card fadein"><div className="sum-ico ico-g">⚡</div><div className="sum-lbl">Total Power</div><div className="sum-val g">{totalPower.toFixed(1)}</div><div className="sum-unit">Watts</div><div className="sum-note">Combined Draw</div></div>
         <div className="sum-card fadein"><div className="sum-ico ico-s">📊</div><div className="sum-lbl">Total Usage</div><div className="sum-val">{totalEnergy.toFixed(3)}</div><div className="sum-unit">kWh consumed</div><div className="sum-note">Cumulative</div></div>
-        <div className="sum-card fadein"><div className="sum-ico ico-a">💰</div><div className="sum-lbl">Estimated Cost</div><div className="sum-val a">₱{dailyCost}</div><div className="sum-unit">at ₱{phpRate.toFixed(2)}/kWh</div><div className="sum-note">Monthly est: <b>₱{monthlyEst}</b></div></div>
+        <div className="sum-card fadein"><div className="sum-ico ico-a">💰</div><div className="sum-lbl">Session Cost</div><div className="sum-val a">₱{dailyCost}</div><div className="sum-unit">Current kWh × ₱{phpRate.toFixed(2)}/kWh</div><div className="sum-note">Est. Monthly: <b>₱{monthlyEst}</b></div></div>
         <div className="sum-card fadein"><div className="sum-ico ico-b">🔌</div><div className="sum-lbl">Live Voltage</div><div className="sum-val">{avgVoltage.toFixed(1)}</div><div className="sum-unit">Volts AC · 60 Hz</div><div className="sum-note">Main Line</div></div>
       </div>
 

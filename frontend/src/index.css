@@ -26,6 +26,7 @@ html,body{height:100%;overflow-x:hidden}
   --shadow-md:0 6px 20px rgba(0,0,0,0.09),0 0 0 1px rgba(0,0,0,0.04);
   --shadow-lg:0 20px 60px rgba(0,0,0,0.15),0 0 0 1px rgba(0,0,0,0.05);
   --sidebar-w:230px;
+  --sidebar-w-collapsed:74px;
   --mob-bar:58px;
 }
 
@@ -76,7 +77,19 @@ body{
   top:0;
   height:100vh;
   overflow-y:auto;
+  transition: width 0.22s ease, padding 0.22s ease;
 }
+.sidebar.collapsed{
+  width:var(--sidebar-w-collapsed);
+  padding:22px 10px 18px;
+}
+.sidebar-toggle{
+  width:28px;height:28px;border-radius:8px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;margin:0 0 10px 6px;
+}
+.sidebar-toggle svg{width:14px;height:14px}
+.sidebar.collapsed .sidebar-toggle{margin:0 auto 10px}
 .logo{display:flex;align-items:center;gap:10px;padding:0 8px;margin-bottom:28px}
 .logo-mark{
   width:32px;height:32px;border-radius:9px;flex-shrink:0;
@@ -101,8 +114,21 @@ body{
   cursor:pointer;transition:all 0.15s;margin-bottom:1px;
 }
 .nav-item svg{width:15px;height:15px;flex-shrink:0}
+.nav-text{white-space:nowrap}
 .nav-item:hover{background:var(--surface2);color:var(--text)}
 .nav-item.active{background:var(--green-l);color:var(--green)}
+.sidebar.collapsed .logo{justify-content:center;padding:0;margin-bottom:22px}
+.sidebar.collapsed .logo-name,
+.sidebar.collapsed .logo-tag,
+.sidebar.collapsed .nav-sect-label,
+.sidebar.collapsed .nav-text,
+.sidebar.collapsed .sidebar-rate{
+  display:none;
+}
+.sidebar.collapsed .nav-item{
+  justify-content:center;
+  padding:10px 0;
+}
 
 .sidebar-rate{
   margin-top:auto;

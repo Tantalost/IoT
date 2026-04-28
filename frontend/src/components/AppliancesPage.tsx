@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 
@@ -26,10 +26,19 @@ interface EnergyNode {
 interface AppliancesProps {
   liveData: { nodes: EnergyNode[]; timestamp?: string };
   history: { nodes: EnergyNode[]; timestamp?: string }[];
+  phpRate: number;
 }
 
-const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
+const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 1024);
+  const NOISE_FLOOR_WATTS = 3.0;
+  const cleanNodes = useMemo(() => (
+    (liveData?.nodes || []).map(node => ({
+      ...node,
+      power: node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
+      current: node.power < NOISE_FLOOR_WATTS ? 0 : node.current
+    }))
+  ), [liveData]);
 
   const [diagnostics, setDiagnostics] = useState<Record<number, NodeDiagnostics>>(() => {
     const initial: Record<number, NodeDiagnostics> = {
@@ -121,16 +130,6 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
     return () => clearInterval(interval);
   }, [history, cleanNodes]);
 
-  const NOISE_FLOOR_WATTS = 3.0;
-  const cleanNodes = (liveData?.nodes || []).map(node => ({
-    ...node,
-    power: node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
-    current: node.power < NOISE_FLOOR_WATTS ? 0 : node.current
-  }));
-
-  const node1 = cleanNodes.find(n => n.id === 1) || { id: 1, voltage: 0, current: 0, power: 0, energy: 0 };
-  const node2 = cleanNodes.find(n => n.id === 2) || { id: 2, voltage: 0, current: 0, power: 0, energy: 0 };
-
   const createChartConfig = (nodeId: number, colorHex: string, rgbaFill: string) => {
     const nodeHistory = history.map(item => {
       const targetNode = (item.nodes || []).find(n => n.id === nodeId);
@@ -165,8 +164,17 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
 
   const chart1 = createChartConfig(1, '#3b82f6', 'rgba(59, 130, 246, 0.15)'); // Blue theme
   const chart2 = createChartConfig(2, '#10b981', 'rgba(16, 185, 129, 0.15)'); // Green theme
+  const node1 = cleanNodes.find(n => n.id === 1) || { id: 1, voltage: 0, current: 0, power: 0, energy: 0 };
+  const node2 = cleanNodes.find(n => n.id === 2) || { id: 2, voltage: 0, current: 0, power: 0, energy: 0 };
+  const totalPower = cleanNodes.reduce((sum, node) => sum + (node.power || 0), 0);
+  const totalEnergy = cleanNodes.reduce((sum, node) => sum + (node.energy || 0), 0);
 
   const SensorCard = ({ node, chart, title, themeColor }: { node: EnergyNode, chart: any, title: string, themeColor: string }) => {
+    const costPerHour = (node.power / 1000) * phpRate;
+    const estimatedDailyCost = costPerHour * 24;
+    const estimatedMonthlyCost = estimatedDailyCost * 30;
+    const sessionCost = node.energy * phpRate;
+
     const isActive = node.power > 0;
     const diagnostic = diagnostics[node.id];
 
@@ -239,6 +247,28 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
         </div>
 
         <div>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text2)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Consumption Cost Metrics</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>COST PER HOUR</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: themeColor }}>₱{costPerHour.toFixed(3)}</div>
+            </div>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>EST. DAILY COST</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text1)' }}>₱{estimatedDailyCost.toFixed(2)}</div>
+            </div>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>EST. MONTHLY COST</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text1)' }}>₱{estimatedMonthlyCost.toFixed(2)}</div>
+            </div>
+            <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '6px', fontWeight: 600 }}>SESSION ENERGY COST</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text1)' }}>₱{sessionCost.toFixed(2)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
           <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text2)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Power Draw History</h3>
           <div style={{ height: '220px', width: '100%', border: '1px solid var(--border)', borderRadius: '12px', padding: '10px', background: 'var(--bg)' }}>
             <Line data={chart.data} options={chart.options as any} />
@@ -296,6 +326,28 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history }) => {
         <div style={{ marginBottom: '30px' }}>
           <h1 style={{ fontSize: '28px', fontWeight: 700, color: 'var(--text1)', margin: '0 0 8px 0' }}>Hardware Diagnostics</h1>
           <p style={{ color: 'var(--text2)', margin: 0, fontSize: '16px' }}>Detailed telemetry for active ESP32 sensor nodes.</p>
+        </div>
+
+        <div style={{ marginBottom: '24px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px' }}>
+          <div style={{ color: 'var(--text2)', fontSize: '13px', marginBottom: '8px', fontWeight: 600 }}>COMBINED REAL-TIME COST SNAPSHOT</div>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '12px' }}>
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text2)' }}>Total Power</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text1)' }}>{totalPower.toFixed(1)}W</div>
+            </div>
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text2)' }}>Cost / Hour</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text1)' }}>₱{((totalPower / 1000) * phpRate).toFixed(3)}</div>
+            </div>
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text2)' }}>Est. Daily Cost</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text1)' }}>₱{(((totalPower / 1000) * phpRate) * 24).toFixed(2)}</div>
+            </div>
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text2)' }}>Session Cost</div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text1)' }}>₱{(totalEnergy * phpRate).toFixed(2)}</div>
+            </div>
+          </div>
         </div>
 
         {/* 2-Split Grid Layout */}

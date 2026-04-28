@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import WattWatchDashboard from './components/WattWatchDashboard';
 import AppliancesPage from './components/AppliancesPage';
 import AnalyticsPage from './components/AnalyticsPage';
+import HistoryPage from './components/HistoryPage';
 export interface EnergyNode {
   id: number;
   voltage: number;
@@ -16,20 +17,23 @@ export interface EnergyData {
   timestamp?: string;
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+
 // Connect to the server ONCE at the app level
-const socket = io('http://192.168.137.1:3000');
+const socket = io(API_BASE_URL);
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isDark, setIsDark] = useState<boolean>(() => localStorage.getItem('theme') === 'dark');
-  const [phpRate, setPhpRate] = useState<number>(12); // Lifted the rate so Settings can change it later!
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === 'true');
+  const [phpRate] = useState<number>(12); // Kept in state for future settings panel
   
   // 🚀 NEW: High consumption alert settings
-  const [alertThreshold, setAlertThreshold] = useState<number>(() => {
+  const [alertThreshold] = useState<number>(() => {
     const saved = localStorage.getItem('wattwatch_alert_threshold');
     return saved ? parseFloat(saved) : 1000; // Default 1000W
   });
-  const [alertsEnabled, setAlertsEnabled] = useState<boolean>(() => {
+  const [alertsEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('wattwatch_alerts_enabled');
     return saved !== null ? saved === 'true' : true; // Default enabled
   });
@@ -55,7 +59,10 @@ const App: React.FC = () => {
     // 2. Initial History Fetch
     const fetchHistory = async () => {
       try {
-        const response = await fetch('http://192.168.137.62:3000/api/energy/history');
+        const response = await fetch(`${API_BASE_URL}/api/energy/history?limit=500`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         setHistory(data);
       } catch (error) {
@@ -81,12 +88,46 @@ const App: React.FC = () => {
     };
   }, [isDark, alertThreshold, alertsEnabled]); // Re-run when settings change
 
+  useEffect(() => {
+    const syncRateToBackend = async () => {
+      try {
+        await fetch(`${API_BASE_URL}/api/settings/rate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phpRate })
+        });
+      } catch (error) {
+        console.error('Failed to sync rate to backend:', error);
+      }
+    };
+
+    syncRateToBackend();
+  }, [phpRate]);
+
+  useEffect(() => {
+    localStorage.setItem('sidebar_collapsed', isSidebarCollapsed.toString());
+  }, [isSidebarCollapsed]);
+
   return (
     <div className="app">
       {/* ── DESKTOP SIDEBAR ── */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div>
+            <button
+              className="sidebar-toggle"
+              onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+              aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {isSidebarCollapsed ? (
+                  <polyline points="9 18 15 12 9 6" />
+                ) : (
+                  <polyline points="15 18 9 12 15 6" />
+                )}
+              </svg>
+            </button>
             <div className="logo">
               <div className="logo-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg></div>
               <div><div className="logo-name">WattWatch</div><div className="logo-tag">Energy Monitor</div></div>
@@ -95,13 +136,16 @@ const App: React.FC = () => {
             <div className="nav-sect">
               <div className="nav-sect-label">Monitor</div>
               <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> Dashboard
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg><span className="nav-text">Dashboard</span>
               </div>
               <div className={`nav-item ${activeTab === 'devices' ? 'active' : ''}`} onClick={() => setActiveTab('devices')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg> Appliances
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg><span className="nav-text">Appliances</span>
               </div>
               <div className={`nav-item ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Analytics
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span className="nav-text">Analytics</span>
+              </div>
+              <div className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 3"/></svg><span className="nav-text">History</span>
               </div>
             </div>
           </div>
@@ -110,7 +154,7 @@ const App: React.FC = () => {
             <div className="nav-item" onClick={() => setIsDark(!isDark)} style={{ marginBottom: '15px', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                 {isDark ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>}
-                <span>{isDark ? 'Dark Mode' : 'Light Mode'}</span>
+                <span className="nav-text">{isDark ? 'Dark Mode' : 'Light Mode'}</span>
               </div>
             </div>
             <div className="sidebar-rate">
@@ -142,15 +186,19 @@ const App: React.FC = () => {
           phpRate={phpRate} 
           alertThreshold={alertThreshold}
           alertsEnabled={alertsEnabled}
+          apiBaseUrl={API_BASE_URL}
         />
       )}
       {activeTab === 'devices' && (
-        <AppliancesPage liveData={liveData} history={history} />
+        <AppliancesPage liveData={liveData} history={history} phpRate={phpRate} />
       )}
       {activeTab === 'analytics' && (
         <AnalyticsPage liveData={liveData} history={history} phpRate={phpRate} />
       )}
-      {(activeTab !== 'dashboard' && activeTab !== 'devices' && activeTab !== 'analytics') && (
+      {activeTab === 'history' && (
+        <HistoryPage history={history} phpRate={phpRate} apiBaseUrl={API_BASE_URL} />
+      )}
+      {(activeTab !== 'dashboard' && activeTab !== 'devices' && activeTab !== 'analytics' && activeTab !== 'history') && (
         <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text3)' }}>
           <h2>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module Under Construction 🚧</h2>
         </div>
@@ -161,6 +209,7 @@ const App: React.FC = () => {
         <button className={`mob-nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg><span>Home</span></button>
         <button className={`mob-nav-btn ${activeTab === 'devices' ? 'active' : ''}`} onClick={() => setActiveTab('devices')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg><span>Devices</span></button>
         <button className={`mob-nav-btn ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>Analytics</span></button>
+        <button className={`mob-nav-btn ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 3"/></svg><span>History</span></button>
       </nav>
     </div>
   );
