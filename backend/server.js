@@ -36,6 +36,36 @@ const SESSION_ACTIVE_WATTS = 1.5;
 const DEFAULT_RATE_PER_KWH = parseNumber(process.env.DEFAULT_RATE_PER_KWH) || 12;
 let currentRatePerKwh = DEFAULT_RATE_PER_KWH;
 const activeSessions = new Map();
+const notifications = [];
+const ALERT_COOLDOWN_MS = 60 * 1000;
+const POWER_SPIKE_THRESHOLD_WATTS = parseNumber(process.env.POWER_SPIKE_THRESHOLD_WATTS) || 50;
+const RECONNECT_GAP_MS = 30 * 1000;
+const nodeLastSeen = new Map();
+const nodeRecentConnectivity = new Map();
+const notificationCooldown = new Map();
+
+function canEmitNotification(key, nowMs) {
+  const last = notificationCooldown.get(key) || 0;
+  if (nowMs - last < ALERT_COOLDOWN_MS) return false;
+  notificationCooldown.set(key, nowMs);
+  return true;
+}
+
+function createNotification({ severity, title, body, node, timestamp }) {
+  const notification = {
+    id: randomUUID(),
+    type: severity,
+    title,
+    body,
+    node: parseNumber(node),
+    timestamp: timestamp || new Date().toISOString(),
+    unread: true
+  };
+  notifications.unshift(notification);
+  if (notifications.length > 300) notifications.length = 300;
+  io.emit('notification:new', notification);
+  return notification;
+}
 
 function parseNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -203,6 +233,59 @@ app.post('/api/energy', async (req, res) => {
 
   try {
     io.emit('live_power_reading', { nodes });
+    const nowMs = Date.now();
+
+    // Build notifications from live anomalies on server-side (single source of truth).
+    nodes.forEach((node) => {
+      const nodeId = parseNumber(node.id);
+      if (nodeId === null) return;
+      const power = Math.max(parseNumber(node.power) || 0, 0);
+      const voltage = Math.max(parseNumber(node.voltage) || 0, 0);
+
+      // Warning: power spike beyond configured threshold.
+      if (power > POWER_SPIKE_THRESHOLD_WATTS && canEmitNotification(`spike:${nodeId}`, nowMs)) {
+        createNotification({
+          severity: 'warning',
+          title: `Peak draw spike - Node ${nodeId}`,
+          body: `${power.toFixed(1)}W detected, above ${POWER_SPIKE_THRESHOLD_WATTS}W threshold`,
+          node: nodeId,
+          timestamp: new Date(nowMs).toISOString()
+        });
+      }
+
+      // Track rolling uptime using recent connectivity samples.
+      const recent = nodeRecentConnectivity.get(nodeId) || [];
+      recent.push(voltage > 0 ? 1 : 0);
+      while (recent.length > 20) recent.shift();
+      nodeRecentConnectivity.set(nodeId, recent);
+      const uptime = recent.length > 0 ? (recent.reduce((sum, n) => sum + n, 0) / recent.length) * 100 : 100;
+
+      if (uptime < 50 && canEmitNotification(`uptime:${nodeId}`, nowMs)) {
+        createNotification({
+          severity: 'critical',
+          title: `Uptime drop - Node ${nodeId}`,
+          body: `Connection uptime is ${Math.round(uptime)}% in recent samples`,
+          node: nodeId,
+          timestamp: new Date(nowMs).toISOString()
+        });
+      }
+
+      // Resolved: reconnection after long gap.
+      const previousSeen = nodeLastSeen.get(nodeId);
+      const hasGap = previousSeen ? nowMs - previousSeen > RECONNECT_GAP_MS : false;
+      if (voltage > 0) {
+        if (hasGap && canEmitNotification(`reconnect:${nodeId}`, nowMs)) {
+          createNotification({
+            severity: 'resolved',
+            title: `Node ${nodeId} reconnected`,
+            body: 'Telemetry restored after connection gap',
+            node: nodeId,
+            timestamp: new Date(nowMs).toISOString()
+          });
+        }
+        nodeLastSeen.set(nodeId, nowMs);
+      }
+    });
 
     const requestId = randomUUID();
     const rows = nodes.map((node) => ({
@@ -231,6 +314,68 @@ app.post('/api/energy', async (req, res) => {
     console.error("Error:", error);
     res.status(500).send({ error: "Failed to process data" });
   }
+});
+
+app.get('/api/notifications', (req, res) => {
+  const unreadOnly = req.query.unread === 'true';
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  const list = unreadOnly ? notifications.filter((item) => item.unread) : notifications;
+  res.status(200).send(list.slice(0, limit));
+});
+
+app.post('/api/notifications', (req, res) => {
+  const { type, title, body, node, timestamp } = req.body || {};
+  if (!type || !title || !body) {
+    return res.status(400).send({ error: 'type, title, and body are required' });
+  }
+  const created = createNotification({
+    severity: type,
+    title,
+    body,
+    node,
+    timestamp: timestamp || new Date().toISOString()
+  });
+  return res.status(201).send(created);
+});
+
+app.post('/api/notifications/mark-read', (_req, res) => {
+  notifications.forEach((item) => { item.unread = false; });
+  return res.status(200).send({ success: true });
+});
+
+app.post('/api/notifications/simulate', (_req, res) => {
+  const now = Date.now();
+  const simulated = [
+    createNotification({
+      severity: 'critical',
+      title: 'Critical - Uptime drop Node 1',
+      body: 'Connection uptime fell below 50%',
+      node: 1,
+      timestamp: new Date(now - 4 * 60 * 1000).toISOString()
+    }),
+    createNotification({
+      severity: 'warning',
+      title: 'Warning - Peak draw spike Node 2',
+      body: '94.2W detected above configured threshold',
+      node: 2,
+      timestamp: new Date(now - 3 * 60 * 1000).toISOString()
+    }),
+    createNotification({
+      severity: 'resolved',
+      title: 'Resolved - Node 1 reconnected',
+      body: 'Telemetry stream restored',
+      node: 1,
+      timestamp: new Date(now - 2 * 60 * 1000).toISOString()
+    }),
+    createNotification({
+      severity: 'info',
+      title: 'Info - Monitoring active',
+      body: 'All nodes are streaming normally',
+      node: null,
+      timestamp: new Date(now - 60 * 1000).toISOString()
+    })
+  ];
+  return res.status(201).send(simulated);
 });
 
 app.get('/api/energy/latest', async (req, res) => {

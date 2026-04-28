@@ -143,16 +143,6 @@ const HistoryPage: React.FC<HistoryPageProps> = ({ history, phpRate, apiBaseUrl 
   return (
     <div style={{ background: 'var(--bg)', minHeight: '100vh', padding: '40px 20px', fontFamily: 'system-ui, -apple-system, sans-serif', display: 'flex', justifyContent: 'center' }}>
       <div style={{ width: '100%', maxWidth: '1200px' }}>
-        <div style={{ marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '28px', fontWeight: 700, color: 'var(--text1)', margin: '0 0 8px 0' }}>Appliance History</h1>
-          <p style={{ color: 'var(--text2)', margin: 0, fontSize: '16px' }}>
-            Previous appliance activity and consumption rates by outlet.
-          </p>
-          <p style={{ color: 'var(--text3)', margin: '6px 0 0 0', fontSize: '13px' }}>
-            Current rate reference: ₱{phpRate.toFixed(2)}/kWh
-          </p>
-        </div>
-
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '860px' }}>
             <thead>

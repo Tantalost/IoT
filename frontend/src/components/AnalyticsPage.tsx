@@ -435,12 +435,6 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate })
         </div>
       )}
       <div style={{ width: '100%', maxWidth: '1200px' }}>
-        
-        <div style={{ marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '30px', letterSpacing: '-0.02em', fontWeight: 700, color: 'var(--text1)', margin: '0 0 8px 0' }}>Energy Analytics</h1>
-          <p style={{ color: 'var(--text2)', margin: 0, fontSize: '15px' }}>Cost forecasting, consumption breakdowns, and efficiency comparisons.</p>
-        </div>
-
         <div style={{ marginBottom: '30px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--text1)' }}>Consumption Comparison</h3>

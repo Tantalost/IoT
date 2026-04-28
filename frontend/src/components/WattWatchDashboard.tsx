@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler, ArcElement, Legend } from 'chart.js';
+import { Line, Doughnut } from 'react-chartjs-2';
 import ApplianceModal from './ApplianceModal';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler, ArcElement, Legend);
 
 // Update interfaces
 interface EnergyNode {
@@ -42,18 +42,83 @@ interface ConnectionState {
 }
 
 // Smart Dictionary: Expected maximum wattage for different types to calculate usage percentages
-const APPLIANCE_SPECS: Record<string, { expectedWatts: number, icon: string }> = {
-  charger: { expectedWatts: 20, icon: '🔌' },
-  ac: { expectedWatts: 1500, icon: '❄️' },
-  fridge: { expectedWatts: 400, icon: '🧊' },
-  fan: { expectedWatts: 70, icon: '🌀' },
-  desktop: { expectedWatts: 500, icon: '💻' },
-  microwave: { expectedWatts: 1200, icon: '🍱' },
-  default: { expectedWatts: 1000, icon: '🔌' }
+const APPLIANCE_SPECS: Record<string, { expectedWatts: number }> = {
+  charger: { expectedWatts: 20 },
+  ac: { expectedWatts: 1500 },
+  fridge: { expectedWatts: 400 },
+  fan: { expectedWatts: 70 },
+  desktop: { expectedWatts: 500 },
+  microwave: { expectedWatts: 1200 },
+  default: { expectedWatts: 1000 }
+};
+
+const MetricIcon: React.FC<{ kind: 'power' | 'devices' | 'cost' | 'voltage' }> = ({ kind }) => {
+  const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+
+  if (kind === 'power') {
+    return (
+      <svg {...common}>
+        <path d="M13 2 3 14h7l-1 8 10-12h-7z" />
+      </svg>
+    );
+  }
+  if (kind === 'devices') {
+    return (
+      <svg {...common}>
+        <rect x="7" y="3" width="10" height="14" rx="2" />
+        <path d="M10 21h4" />
+        <path d="M12 17v4" />
+      </svg>
+    );
+  }
+  if (kind === 'cost') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9 14c0 1.5 1.3 2.5 3 2.5s3-1 3-2.5-1.3-2.5-3-2.5-3-1-3-2.5S10.3 6 12 6s3 1 3 2.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M3 7h18" />
+      <path d="M6 7V5" />
+      <path d="M18 7V5" />
+      <rect x="4" y="7" width="16" height="12" rx="2" />
+      <path d="M8 11h8" />
+      <path d="M8 15h5" />
+    </svg>
+  );
+};
+
+const ApplianceTypeIcon: React.FC<{ type: string }> = ({ type }) => {
+  const common = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+
+  if (type === 'ac') {
+    return <svg {...common}><path d="M4 12h16" /><path d="M7 8h10" /><path d="M7 16h10" /><path d="M10 12v7" /><path d="M14 12v7" /></svg>;
+  }
+  if (type === 'fridge') {
+    return <svg {...common}><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M7 11h10" /><path d="M9 8h.01" /><path d="M9 15h.01" /></svg>;
+  }
+  if (type === 'fan') {
+    return <svg {...common}><circle cx="12" cy="12" r="2" /><path d="M12 4c2 0 3 1.5 3 3s-1 3-3 3" /><path d="M20 12c0 2-1.5 3-3 3s-3-1-3-3" /><path d="M12 20c-2 0-3-1.5-3-3s1-3 3-3" /><path d="M4 12c0-2 1.5-3 3-3s3 1 3 3" /></svg>;
+  }
+  if (type === 'desktop') {
+    return <svg {...common}><rect x="4" y="5" width="16" height="10" rx="2" /><path d="M9 19h6" /><path d="M12 15v4" /></svg>;
+  }
+  if (type === 'microwave') {
+    return <svg {...common}><rect x="3" y="6" width="18" height="12" rx="2" /><rect x="6" y="9" width="8" height="6" rx="1" /><path d="M17 9h.01" /><path d="M17 12h.01" /><path d="M17 15h.01" /></svg>;
+  }
+  if (type === 'charger') {
+    return <svg {...common}><rect x="8" y="3" width="8" height="14" rx="2" /><path d="M10 21h4" /><path d="M12 17v4" /></svg>;
+  }
+  return <svg {...common}><path d="M7 3h10v4H7z" /><path d="M9 7v5" /><path d="M15 7v5" /><rect x="6" y="12" width="12" height="7" rx="2" /></svg>;
 };
 
 const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRate, alertThreshold, alertsEnabled, apiBaseUrl }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 768);
+  const [isTablet, setIsTablet] = useState<boolean>(window.innerWidth <= 1280);
+  const [powerTimeRange, setPowerTimeRange] = useState<'live' | '1h' | '24h'>('live');
   
   // 🚀 NEW: Alert system state
   const [activeAlerts, setActiveAlerts] = useState<Set<number>>(new Set());
@@ -224,9 +289,15 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
+  // Inline appliance label editing state (Phase 2).
+  const [editingNodeId, setEditingNodeId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState<string>('');
 
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+      setIsTablet(window.innerWidth <= 1280);
+    };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -318,6 +389,49 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
     setModalOpen(true);
   };
 
+  const handleStartRename = (nodeId: number, currentName: string) => {
+    setEditingNodeId(nodeId);
+    setEditingName(currentName);
+  };
+
+  const handleCancelRename = () => {
+    setEditingNodeId(null);
+    setEditingName('');
+  };
+
+  const handleSaveRename = async (nodeId: number) => {
+    const nextName = editingName.trim();
+    if (!nextName) return;
+
+    const existing = configuredNodes[nodeId];
+    if (!existing) return;
+
+    setConfiguredNodes(prev => ({
+      ...prev,
+      [nodeId]: {
+        ...prev[nodeId],
+        name: nextName
+      }
+    }));
+
+    try {
+      await fetch(`${apiBaseUrl}/api/appliances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outlet_id: nodeId,
+          appliance_name: nextName,
+          appliance_type: existing.type,
+          standard_wattage: APPLIANCE_SPECS[existing.type]?.expectedWatts || APPLIANCE_SPECS.default.expectedWatts
+        })
+      });
+    } catch (error) {
+      console.error('Failed to rename appliance on backend:', error);
+    } finally {
+      handleCancelRename();
+    }
+  };
+
   // --- 2. CALCULATE SUMMARY TOTALS (Using Cleaned Data) ---
   const totalPower = cleanNodes.reduce((sum, node) => sum + (node.power || 0), 0);
   const totalEnergy = cleanNodes.reduce((sum, node) => sum + (node.energy || 0), 0);
@@ -332,20 +446,88 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
   // Only show widgets for nodes that are actually drawing real power (above 0)
   const activeNodes = cleanNodes.filter(node => node.power > 0);
 
-  // Chart configuration
-  const chartDataConfig = {
-    labels: history.map(item => {
-      const date = item.timestamp ? new Date(item.timestamp) : new Date();
-      return date.toLocaleTimeString([], { hour12: false });
-    }),
-    datasets: [{
-      label: 'Total Power (Watts)',
-      data: history.map(item => (item.nodes || []).reduce((sum, n) => sum + (n.power || 0), 0)),
-      borderColor: '#16a361', backgroundColor: 'rgba(22, 163, 97, 0.1)', fill: true, tension: 0.4,
-      pointRadius: isMobile ? 0 : 3, pointBackgroundColor: '#16a361',
-    }],
+  const now = Date.now();
+  const timeRangeMs = powerTimeRange === '1h' ? 60 * 60 * 1000 : powerTimeRange === '24h' ? 24 * 60 * 60 * 1000 : null;
+  const timeFilteredHistory = (history || []).filter((item, index, arr) => {
+    if (powerTimeRange === 'live') {
+      return index >= Math.max(arr.length - 24, 0);
+    }
+    const ts = item.timestamp ? new Date(item.timestamp).getTime() : 0;
+    return ts > 0 && ts >= now - (timeRangeMs || 0);
+  });
+  const plottedHistory = timeFilteredHistory.length > 0 ? timeFilteredHistory : history;
+  const nodeIds = Array.from(new Set(cleanNodes.map(n => n.id).concat([1, 2]))).sort((a, b) => a - b);
+  const nodeLineColors = ['#16a34a', '#3b82f6', '#f59e0b', '#ef4444'];
+
+  const toRelativeLabel = (timestamp?: string) => {
+    if (!timestamp) return 'now';
+    const deltaMs = Math.max(0, now - new Date(timestamp).getTime());
+    const mins = Math.floor(deltaMs / 60000);
+    if (mins < 1) return 'now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs} hr ago`;
   };
-  const chartOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: isMobile ? 5 : 10 } }, y: { beginAtZero: true } } };
+
+  // Chart configuration (relative-time labels + per-node lines).
+  const chartDataConfig = {
+    labels: plottedHistory.map(item => toRelativeLabel(item.timestamp)),
+    datasets: nodeIds.map((nodeId, idx) => ({
+      label: `Node ${nodeId}`,
+      data: plottedHistory.map(item => (item.nodes || []).find(n => n.id === nodeId)?.power || 0),
+      borderColor: nodeLineColors[idx % nodeLineColors.length],
+      backgroundColor: `${nodeLineColors[idx % nodeLineColors.length]}22`,
+      fill: false,
+      tension: 0.35,
+      pointRadius: isMobile ? 0 : 2,
+      pointHoverRadius: 4
+    }))
+  };
+  const isDarkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
+  const chartTickColor = isDarkTheme ? '#9ca3af' : '#6b7280';
+  const chartGridColor = isDarkTheme ? 'rgba(148, 163, 184, 0.18)' : 'rgba(15, 23, 42, 0.10)';
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'bottom' as const,
+        labels: {
+          color: chartTickColor,
+          usePointStyle: true,
+          pointStyle: 'circle' as const,
+          boxWidth: 8,
+          padding: 16
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: { color: chartGridColor },
+        ticks: {
+          maxTicksLimit: isMobile ? 4 : 6,
+          color: chartTickColor,
+          autoSkip: true,
+          maxRotation: 0
+        }
+      },
+      y: {
+        beginAtZero: true,
+        grid: { color: chartGridColor },
+        ticks: { color: chartTickColor }
+      }
+    }
+  };
+  const loadShareData = {
+    labels: cleanNodes.map(node => configuredNodes[node.id]?.name || `Outlet ${node.id}`),
+    datasets: [{
+      data: cleanNodes.map(node => node.power || 0),
+      backgroundColor: ['#16a34a', '#22c55e', '#86efac', '#bbf7d0'],
+      borderColor: 'rgba(255,255,255,0.9)',
+      borderWidth: 2
+    }]
+  };
 
   // ════════════════════════════════════════════════════════════
   // 📱 MOBILE LAYOUT RENDER
@@ -394,9 +576,35 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
 
               return (
                 <div key={node.id} className="mob-ap-item on fadein" style={{ borderLeft: isOverload ? '4px solid #ef4444' : '4px solid var(--primary)' }}>
-                  <div className="mob-ap-ico">{spec.icon}</div>
+                  <div className="mob-ap-ico"><ApplianceTypeIcon type={config.type} /></div>
                   <div className="mob-ap-info">
                     <div className="mob-ap-slot">Slot {node.id}</div><div className="mob-ap-name">{config.name}</div>
+                    {editingNodeId === node.id ? (
+                      <div style={{ display: 'flex', gap: '6px', margin: '6px 0' }}>
+                        <input
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveRename(node.id);
+                            if (e.key === 'Escape') handleCancelRename();
+                          }}
+                          autoFocus
+                          maxLength={32}
+                          style={{
+                            flex: 1,
+                            background: 'var(--bg)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '8px',
+                            padding: '6px 8px',
+                            color: 'var(--text1)',
+                            fontSize: '12px'
+                          }}
+                        />
+                        <button className="mob-rm-btn" onClick={() => handleSaveRename(node.id)} title="Save name">
+                          ✓
+                        </button>
+                      </div>
+                    ) : null}
                     <div className="mob-ap-meta">
                       <span><b className={isOverload ? "a" : "g"} style={{ color: isOverload ? '#ef4444' : '' }}>{node.power.toFixed(1)}W</b></span>
                       <span>{node.voltage.toFixed(1)}V / {node.current.toFixed(2)}A</span>
@@ -404,6 +612,15 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
                     {isOverload && <div style={{ color: '#ef4444', fontSize: '11px', fontWeight: 600 }}>⚠️ Exceeds expected {spec.expectedWatts}W</div>}
                   </div>
                   <div className="mob-ap-right">
+                    {editingNodeId !== node.id && (
+                      <button
+                        className="mob-rm-btn"
+                        onClick={() => handleStartRename(node.id, config.name)}
+                        title="Rename appliance"
+                      >
+                        ✎
+                      </button>
+                    )}
                     <button className="mob-rm-btn" onClick={(e) => handleRemoveAppliance(node.id, e)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                   </div>
                 </div>
@@ -432,28 +649,108 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
   // ════════════════════════════════════════════════════════════
   return (
     <div className="content">
-      <div className="topbar"><div><div className="page-title">Energy Dashboard</div><div className="page-sub">Reactive Sensor Network Active</div></div><div className="live-pill"><div className="pulse"></div> Live · Connected{activeAlerts.size > 0 ? ` · ${activeAlerts.size} Alert${activeAlerts.size > 1 ? 's' : ''}` : ''}</div></div>
-
-      <div className="sum-grid">
-        <div className="sum-card fadein"><div className="sum-ico ico-g">⚡</div><div className="sum-lbl">Total Power</div><div className="sum-val g">{totalPower.toFixed(1)}</div><div className="sum-unit">Watts</div><div className="sum-note">Combined Draw</div></div>
-        <div className="sum-card fadein"><div className="sum-ico ico-s">📊</div><div className="sum-lbl">Total Usage</div><div className="sum-val">{totalEnergy.toFixed(3)}</div><div className="sum-unit">kWh consumed</div><div className="sum-note">Cumulative</div></div>
-        <div className="sum-card fadein"><div className="sum-ico ico-a">💰</div><div className="sum-lbl">Session Cost</div><div className="sum-val a">₱{dailyCost}</div><div className="sum-unit">Current kWh × ₱{phpRate.toFixed(2)}/kWh</div><div className="sum-note">Est. Monthly: <b>₱{monthlyEst}</b></div></div>
-        <div className="sum-card fadein"><div className="sum-ico ico-b">🔌</div><div className="sum-lbl">Live Voltage</div><div className="sum-val">{avgVoltage.toFixed(1)}</div><div className="sum-unit">Volts AC · 60 Hz</div><div className="sum-note">Main Line</div></div>
+      <div style={{ display: 'grid', gridTemplateColumns: isTablet ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: '16px', marginTop: '14px' }}>
+        <div className="sum-card fadein" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div className="sum-lbl">Live Total Draw</div>
+            <div style={{ width: '30px', height: '30px', borderRadius: '10px', display: 'grid', placeItems: 'center', background: '#ecfdf3', color: '#16a34a' }}><MetricIcon kind="power" /></div>
+          </div>
+          <div className="sum-val g" style={{ fontSize: '30px' }}>{totalPower.toFixed(1)}W</div>
+          <div className="sum-note">Across all outlets</div>
+        </div>
+        <div className="sum-card fadein" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div className="sum-lbl">Active Appliances</div>
+            <div style={{ width: '30px', height: '30px', borderRadius: '10px', display: 'grid', placeItems: 'center', background: '#ecfdf3', color: '#16a34a' }}><MetricIcon kind="devices" /></div>
+          </div>
+          <div className="sum-val" style={{ fontSize: '30px' }}>{activeNodes.length}</div>
+          <div className="sum-note">Currently drawing power</div>
+        </div>
+        <div className="sum-card fadein" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div className="sum-lbl">Session Cost</div>
+            <div style={{ width: '30px', height: '30px', borderRadius: '10px', display: 'grid', placeItems: 'center', background: '#ecfdf3', color: '#16a34a' }}><MetricIcon kind="cost" /></div>
+          </div>
+          <div className="sum-val a" style={{ fontSize: '30px' }}>₱{dailyCost}</div>
+          <div className="sum-note">Using ₱{phpRate.toFixed(2)}/kWh</div>
+        </div>
+        <div className="sum-card fadein" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div className="sum-lbl">Line Voltage</div>
+            <div style={{ width: '30px', height: '30px', borderRadius: '10px', display: 'grid', placeItems: 'center', background: '#ecfdf3', color: '#16a34a' }}><MetricIcon kind="voltage" /></div>
+          </div>
+          <div className="sum-val" style={{ fontSize: '30px' }}>{avgVoltage.toFixed(1)}V</div>
+          <div className="sum-note">Realtime grid level</div>
+        </div>
       </div>
 
-      <div className="chart-row" style={{ marginTop: '30px' }}><div className="chart-card" style={{ gridColumn: 'span 3', height: '300px' }}><div className="chart-title">Power Usage Over Time</div><div className="chart-sub">Combined Wattage History</div><div style={{ height: '220px', width: '100%' }}><Line data={chartDataConfig} options={chartOptions} /></div></div></div>
-
-      <div className="sec-hdr" style={{ marginTop: '30px' }}><div className="sec-title">Active Devices Detected</div><div className="sec-sub">Widgets only appear when power is drawn</div></div>
-
-      <div className="ap-grid">
-        {activeNodes.length === 0 ? (
-          <div className="fadein" style={{ gridColumn: 'span 3', padding: '50px', textAlign: 'center', background: 'var(--surface2)', borderRadius: '16px', border: '1px dashed var(--border)' }}>
-            <div style={{ fontSize: '32px', marginBottom: '10px' }}>🔌</div>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text1)' }}>All outlets are idle</div>
-            <div style={{ fontSize: '14px', color: 'var(--text3)' }}>Turn an appliance on to view its smart widget.</div>
+      <div style={{ display: 'grid', gridTemplateColumns: isTablet ? '1fr' : 'minmax(0, 2fr) minmax(320px, 1fr)', gap: '16px', marginTop: '18px' }}>
+        <div className="chart-card" style={{ minWidth: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
+            <div>
+              <div className="chart-title">Power Draw</div>
+              <div className="chart-sub">Node-level patterns with relative time</div>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', background: 'var(--bg)', border: '1px solid var(--border)', padding: '4px', borderRadius: '999px' }}>
+              {(['live', '1h', '24h'] as const).map((range) => (
+                <button
+                  key={range}
+                  onClick={() => setPowerTimeRange(range)}
+                  style={{
+                    border: 'none',
+                    borderRadius: '999px',
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    background: powerTimeRange === range ? '#16a34a' : 'transparent',
+                    color: powerTimeRange === range ? '#fff' : 'var(--text2)'
+                  }}
+                >
+                  {range === 'live' ? 'Live' : range}
+                </button>
+              ))}
+            </div>
           </div>
-        ) : (
-          activeNodes.map(node => {
+          <div style={{ height: '220px', width: '100%' }}><Line data={chartDataConfig} options={chartOptions} /></div>
+        </div>
+        <div className="chart-card" style={{ minWidth: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)' }}>
+          <div className="chart-title">Outlet Load Distribution</div>
+          <div className="chart-sub">Current draw share by configured outlet</div>
+          <div style={{ height: '220px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Doughnut
+              data={loadShareData}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 10, color: chartTickColor }
+                  }
+                }
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '18px', display: 'grid', gridTemplateColumns: isTablet ? '1fr' : '1fr 260px', alignItems: 'start', gap: '12px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '16px', boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)' }}>
+          <div className="sec-hdr" style={{ marginTop: 0, marginBottom: '12px' }}>
+            <div className="sec-title">Connected Appliances</div>
+            <div className="sec-sub">Rename, review live metrics, and monitor overload status</div>
+          </div>
+
+          <div className="ap-grid" style={{ marginTop: 0 }}>
+            {activeNodes.length === 0 ? (
+              <div className="fadein" style={{ gridColumn: '1 / -1', width: '100%', padding: '50px', textAlign: 'center', background: 'var(--surface2)', borderRadius: '16px', border: '1px dashed var(--border)' }}>
+                <div style={{ fontSize: '32px', marginBottom: '10px' }}>🔌</div>
+                <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text1)' }}>All outlets are idle</div>
+                <div style={{ fontSize: '14px', color: 'var(--text3)' }}>Turn an appliance on to view its smart widget.</div>
+              </div>
+            ) : (
+              activeNodes.map(node => {
             const config = configuredNodes[node.id];
 
             // IF NOT CONFIGURED YET
@@ -479,11 +776,59 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
             const usagePercent = Math.min((node.power / spec.expectedWatts) * 100, 100);
             const isOverload = node.power > (spec.expectedWatts * 1.3);
 
-            return (
-              <div key={node.id} className="ap-card on fadein" style={{ border: isOverload ? '1px solid #ef4444' : '' }}>
+                return (
+                  <div key={node.id} className="ap-card on fadein" style={{ border: isOverload ? '1px solid #ef4444' : '' }}>
                 <button className="ap-rm" onClick={(e) => handleRemoveAppliance(node.id, e)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                <div className="ap-ico">{spec.icon}</div>
-                <div className="ap-name">{config.name}</div>
+                <div className="ap-ico"><ApplianceTypeIcon type={config.type} /></div>
+                {editingNodeId === node.id ? (
+                  <div style={{ marginTop: '4px', width: '100%' }}>
+                    <input
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveRename(node.id);
+                        if (e.key === 'Escape') handleCancelRename();
+                      }}
+                      autoFocus
+                      maxLength={32}
+                      style={{
+                        width: '100%',
+                        background: 'var(--bg)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        color: 'var(--text1)',
+                        fontSize: '14px',
+                        marginBottom: '8px'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => handleSaveRename(node.id)}
+                        style={{ background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={handleCancelRename}
+                        style={{ background: 'transparent', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="ap-name" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>{config.name}</span>
+                    <button
+                      onClick={() => handleStartRename(node.id, config.name)}
+                      title="Rename appliance"
+                      style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text3)', borderRadius: '8px', padding: '2px 6px', cursor: 'pointer', fontSize: '11px' }}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
                 <div className="ap-slot-lbl">Sensor Node {node.id}</div>
                 
                 <div className="ap-row">
@@ -497,10 +842,51 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
                 <div className="ap-bar-bg" style={{ marginTop: isOverload ? '5px' : '15px' }}>
                   <div className="ap-bar" style={{ width: `${usagePercent}%`, backgroundColor: isOverload ? '#ef4444' : 'var(--primary)', transition: 'width 0.5s ease-out' }}></div>
                 </div>
-              </div>
-            );
-          })
-        )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: '12px', minWidth: isTablet ? '100%' : '260px' }}>
+          <div style={{
+            borderRadius: '16px',
+            padding: '14px 16px',
+            background: 'linear-gradient(145deg, #15803d, #22c55e)',
+            color: '#fff',
+            boxShadow: '0 10px 20px rgba(22,163,74,0.25)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            minHeight: '120px'
+          }}>
+            <div style={{ fontSize: '11px', opacity: 0.9, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Monthly Estimate</div>
+            <div style={{ fontSize: '30px', fontWeight: 800, lineHeight: 1.1, margin: '4px 0' }}>₱{monthlyEst}</div>
+            <div style={{ fontSize: '12px', opacity: 0.92 }}>Based on current session cost trend</div>
+          </div>
+
+          <div style={{
+            borderRadius: '16px',
+            padding: '14px 16px',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            color: 'var(--text1)',
+            boxShadow: isDarkTheme ? '0 8px 18px rgba(0,0,0,0.28)' : '0 8px 18px rgba(16,24,40,0.04)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            minHeight: '120px'
+          }}>
+            <div style={{ fontSize: '11px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Live Status</div>
+            <div style={{ fontSize: '28px', fontWeight: 800, lineHeight: 1.1, margin: '4px 0', color: '#16a34a' }}>
+              {activeNodes.length}
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text2)' }}>
+              Active appliance{activeNodes.length === 1 ? '' : 's'} · {activeAlerts.size} alert{activeAlerts.size === 1 ? '' : 's'}
+            </div>
+          </div>
+        </div>
       </div>
 
       <ApplianceModal 

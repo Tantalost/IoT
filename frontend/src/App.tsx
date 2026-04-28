@@ -17,6 +17,16 @@ export interface EnergyData {
   timestamp?: string;
 }
 
+interface NotificationItem {
+  id: string;
+  type: 'critical' | 'warning' | 'resolved' | 'info' | string;
+  title: string;
+  body: string;
+  node?: number | null;
+  timestamp: string;
+  unread: boolean;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
 // Connect to the server ONCE at the app level
@@ -46,6 +56,34 @@ const App: React.FC = () => {
     { id: 2, voltage: 0, current: 0, power: 0, energy: 0 }
   ] 
 });
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [isNotificationOpen, setIsNotificationOpen] = useState<boolean>(false);
+  const [isBellFlash, setIsBellFlash] = useState<boolean>(false);
+  const unreadCount = notifications.filter((item) => item.unread).length;
+  const tabLabelMap: Record<string, string> = {
+    dashboard: 'Energy Dashboard',
+    devices: 'Hardware Diagnostics',
+    analytics: 'Analytics',
+    history: 'History'
+  };
+  const tabHeaderMap: Record<string, { title: string; subtitle: string }> = {
+    dashboard: {
+      title: 'Energy Operations Dashboard',
+      subtitle: 'Live appliance monitoring and cost intelligence'
+    },
+    devices: {
+      title: 'Hardware Diagnostics',
+      subtitle: 'Detailed telemetry for active ESP32 sensor nodes.'
+    },
+    analytics: {
+      title: 'Analytics',
+      subtitle: 'Consumption trends and performance insights.'
+    },
+    history: {
+      title: 'History',
+      subtitle: 'Appliance activity, sessions, and cost timeline.'
+    }
+  };
 
   useEffect(() => {
     // 1. Theme handler
@@ -108,29 +146,72 @@ const App: React.FC = () => {
     localStorage.setItem('sidebar_collapsed', isSidebarCollapsed.toString());
   }, [isSidebarCollapsed]);
 
+  useEffect(() => {
+    let mounted = true;
+    const fetchNotifications = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/notifications?limit=30`);
+        if (!response.ok) return;
+        const data: NotificationItem[] = await response.json();
+        if (mounted) setNotifications(data);
+      } catch (_error) {}
+    };
+
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 7000);
+
+    const handleIncoming = (item: NotificationItem) => {
+      setNotifications((prev) => [item, ...prev.filter((n) => n.id !== item.id)].slice(0, 30));
+      setIsBellFlash(true);
+      setTimeout(() => setIsBellFlash(false), 1200);
+    };
+    socket.on('notification:new', handleIncoming);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+      socket.off('notification:new', handleIncoming);
+    };
+  }, []);
+
+  const severityColor = (type: string) => {
+    if (type === 'critical') return '#ef4444';
+    if (type === 'warning') return '#f59e0b';
+    if (type === 'resolved') return '#10b981';
+    return '#3b82f6';
+  };
+
+  const toggleNotifications = async () => {
+    const opening = !isNotificationOpen;
+    setIsNotificationOpen(opening);
+    if (!opening || unreadCount === 0) return;
+    setNotifications((prev) => prev.map((item) => ({ ...item, unread: false })));
+    try {
+      await fetch(`${API_BASE_URL}/api/notifications/mark-read`, { method: 'POST' });
+    } catch (_error) {}
+  };
+
   return (
     <div className="app">
       {/* ── DESKTOP SIDEBAR ── */}
       <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div>
-            <button
-              className="sidebar-toggle"
-              onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-              aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                {isSidebarCollapsed ? (
-                  <polyline points="9 18 15 12 9 6" />
-                ) : (
-                  <polyline points="15 18 9 12 15 6" />
-                )}
-              </svg>
-            </button>
-            <div className="logo">
-              <div className="logo-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg></div>
-              <div><div className="logo-name">WattWatch</div><div className="logo-tag">Energy Monitor</div></div>
+            <div className="sidebar-top">
+              <div className="logo" style={{ marginBottom: 0 }}>
+                <div className="logo-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg></div>
+                <div><div className="logo-name">WattWatch</div><div className="logo-tag">Energy Monitor</div></div>
+              </div>
+              <button
+                className={`sidebar-toggle ${!isSidebarCollapsed ? 'open' : ''}`}
+                onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+                aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                <span className="burger-line"></span>
+                <span className="burger-line"></span>
+                <span className="burger-line"></span>
+              </button>
             </div>
             
             <div className="nav-sect">
@@ -151,7 +232,7 @@ const App: React.FC = () => {
           </div>
 
           <div style={{ marginTop: 'auto' }}>
-            <div className="nav-item" onClick={() => setIsDark(!isDark)} style={{ marginBottom: '15px', justifyContent: 'space-between' }}>
+            <div className="nav-item darkmode-toggle" onClick={() => setIsDark(!isDark)} style={{ marginBottom: '15px', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                 {isDark ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>}
                 <span className="nav-text">{isDark ? 'Dark Mode' : 'Light Mode'}</span>
@@ -165,6 +246,45 @@ const App: React.FC = () => {
         </div>
       </aside>
 
+      <div className="main-area">
+      <header className="app-topbar">
+        <div className="app-topbar-left">
+          <div className="app-topbar-brand"></div>
+          <div className="app-topbar-title-wrap">
+            <div className="app-topbar-title">{tabHeaderMap[activeTab]?.title || 'Dashboard'}</div>
+            <div className="app-topbar-subtitle">{tabHeaderMap[activeTab]?.subtitle || ''}</div>
+          </div>
+        </div>
+        <div className="app-topbar-right">
+          <button className={`notification-bell ${isBellFlash ? 'flash' : ''}`} onClick={toggleNotifications} aria-label="Open notifications">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
+              <path d="M9.5 17a2.5 2.5 0 0 0 5 0" />
+            </svg>
+            {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+          </button>
+          {isNotificationOpen && (
+            <div className="notification-dropdown">
+              <div className="notification-dropdown-title">Notifications</div>
+              {notifications.length === 0 ? (
+                <div className="notification-empty">No notifications yet.</div>
+              ) : (
+                notifications.map((item) => (
+                  <div key={item.id} className="notification-item">
+                    <div className="notification-dot" style={{ backgroundColor: severityColor(item.type) }}></div>
+                    <div>
+                      <div className="notification-title">{item.title}</div>
+                      <div className="notification-body">{item.body}</div>
+                      <div className="notification-time">{new Date(item.timestamp).toLocaleString()}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </header>
+
       {/* ── MOBILE TOP BAR ── */}
       <header className="mob-topbar">
         <div className="mob-logo">
@@ -172,6 +292,13 @@ const App: React.FC = () => {
           <div className="mob-logo-name">WattWatch</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <button className={`notification-bell ${isBellFlash ? 'flash' : ''}`} onClick={toggleNotifications} aria-label="Open notifications">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
+              <path d="M9.5 17a2.5 2.5 0 0 0 5 0" />
+            </svg>
+            {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+          </button>
           <div onClick={() => setIsDark(!isDark)} style={{ color: 'var(--text3)', cursor: 'pointer', display: 'flex' }}>
              {isDark ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>}
           </div>
@@ -190,7 +317,7 @@ const App: React.FC = () => {
         />
       )}
       {activeTab === 'devices' && (
-        <AppliancesPage liveData={liveData} history={history} phpRate={phpRate} />
+        <AppliancesPage liveData={liveData} history={history} phpRate={phpRate} apiBaseUrl={API_BASE_URL} />
       )}
       {activeTab === 'analytics' && (
         <AnalyticsPage liveData={liveData} history={history} phpRate={phpRate} />
@@ -211,6 +338,7 @@ const App: React.FC = () => {
         <button className={`mob-nav-btn ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>Analytics</span></button>
         <button className={`mob-nav-btn ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 3"/></svg><span>History</span></button>
       </nav>
+      </div>
     </div>
   );
 };

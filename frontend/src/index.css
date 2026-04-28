@@ -63,6 +63,7 @@ body{
    DESKTOP LAYOUT  (sidebar + content side by side)
 ══════════════════════════════════════════════════════ */
 .app{display:flex;min-height:100vh}
+.main-area{flex:1;min-width:0;display:flex;flex-direction:column}
 
 /* ── Sidebar ─────────────────────────────────────────── */
 .sidebar{
@@ -79,17 +80,33 @@ body{
   overflow-y:auto;
   transition: width 0.22s ease, padding 0.22s ease;
 }
+.sidebar-top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:14px;
+}
 .sidebar.collapsed{
   width:var(--sidebar-w-collapsed);
-  padding:22px 10px 18px;
+  padding:16px 8px 14px;
 }
 .sidebar-toggle{
   width:28px;height:28px;border-radius:8px;border:1px solid var(--border);
   background:var(--surface2);color:var(--text2);cursor:pointer;
-  display:flex;align-items:center;justify-content:center;margin:0 0 10px 6px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  flex-shrink:0;
 }
-.sidebar-toggle svg{width:14px;height:14px}
-.sidebar.collapsed .sidebar-toggle{margin:0 auto 10px}
+.burger-line{
+  width:12px;
+  height:1.8px;
+  border-radius:2px;
+  background:currentColor;
+  transition:transform .2s ease, opacity .2s ease;
+}
+.sidebar-toggle.open .burger-line:nth-child(1){transform:translateY(5px) rotate(45deg)}
+.sidebar-toggle.open .burger-line:nth-child(2){opacity:0}
+.sidebar-toggle.open .burger-line:nth-child(3){transform:translateY(-5px) rotate(-45deg)}
 .logo{display:flex;align-items:center;gap:10px;padding:0 8px;margin-bottom:28px}
 .logo-mark{
   width:32px;height:32px;border-radius:9px;flex-shrink:0;
@@ -117,7 +134,22 @@ body{
 .nav-text{white-space:nowrap}
 .nav-item:hover{background:var(--surface2);color:var(--text)}
 .nav-item.active{background:var(--green-l);color:var(--green)}
-.sidebar.collapsed .logo{justify-content:center;padding:0;margin-bottom:22px}
+.sidebar.collapsed .sidebar-top{
+  flex-direction:column;
+  gap:10px;
+  margin-bottom:24px;
+  align-items:center;
+}
+.sidebar.collapsed .logo{
+  justify-content:center;
+  align-items:center;
+  width:100%;
+  padding:0;
+  margin-bottom:0;
+}
+.sidebar.collapsed .logo-mark{
+  margin:0 auto;
+}
 .sidebar.collapsed .logo-name,
 .sidebar.collapsed .logo-tag,
 .sidebar.collapsed .nav-sect-label,
@@ -125,9 +157,35 @@ body{
 .sidebar.collapsed .sidebar-rate{
   display:none;
 }
+.sidebar.collapsed .nav-sect{
+  margin-top:8px;
+}
 .sidebar.collapsed .nav-item{
   justify-content:center;
   padding:10px 0;
+  margin-bottom:4px;
+}
+.sidebar.collapsed .darkmode-toggle{
+  width:42px !important;
+  justify-content:center !important;
+  margin:0 auto 8px !important;
+  padding:10px 0 !important;
+}
+.sidebar.collapsed .darkmode-toggle > div{
+  justify-content:center !important;
+  gap:0 !important;
+}
+.sidebar.collapsed > div{
+  align-items:center;
+}
+.sidebar.collapsed > div > div:last-child{
+  width:100%;
+  display:flex;
+  justify-content:center;
+}
+.sidebar.collapsed > div > div:last-child .nav-item{
+  width:42px;
+  justify-content:center;
 }
 
 .sidebar-rate{
@@ -148,6 +206,45 @@ body{
 
 /* ── Main content area ───────────────────────────────── */
 .content{flex:1;min-width:0;padding:26px 28px}
+.app-topbar{
+  height:62px;border-bottom:1px solid var(--border);background:var(--bg);
+  display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+  position:sticky;top:0;z-index:30;
+}
+.app-topbar-left{display:flex;align-items:center;gap:12px}
+.app-topbar-brand{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.app-topbar-logo{font-size:20px;font-weight:700;letter-spacing:-0.3px}
+.app-topbar-pill{
+  padding:6px 12px;border-radius:999px;background:var(--green-l);color:var(--green);
+  font-size:12px;font-weight:600;
+}
+.app-topbar-title-wrap{display:flex;flex-direction:column;gap:2px}
+.app-topbar-title{font-size:18px;font-weight:700;line-height:1.1;color:var(--text)}
+.app-topbar-subtitle{font-size:12px;color:var(--text3);line-height:1.2}
+.app-topbar-right{position:relative}
+.notification-bell{
+  width:34px;height:34px;border-radius:999px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text2);display:grid;place-items:center;cursor:pointer;position:relative;
+}
+.notification-bell svg{width:18px;height:18px}
+.notification-bell.flash{animation:bellFlash .8s ease}
+@keyframes bellFlash{0%{transform:scale(1)}35%{transform:scale(1.08)}100%{transform:scale(1)}}
+.notification-badge{
+  position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;
+  background:#ef4444;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg);
+}
+.notification-dropdown{
+  position:absolute;top:42px;right:0;width:340px;max-height:380px;overflow:auto;
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-md);padding:8px;
+}
+.notification-dropdown-title{font-size:12px;font-weight:700;color:var(--text2);padding:4px 6px 8px}
+.notification-empty{font-size:13px;color:var(--text3);padding:10px}
+.notification-item{display:flex;gap:10px;padding:9px 6px;border-radius:8px}
+.notification-item:hover{background:var(--surface2)}
+.notification-dot{width:8px;height:8px;border-radius:999px;margin-top:6px;flex-shrink:0}
+.notification-title{font-size:13px;font-weight:600;color:var(--text)}
+.notification-body{font-size:12px;color:var(--text2)}
+.notification-time{font-size:11px;color:var(--text3);margin-top:2px}
 
 /* ─── Top bar (desktop) ─────────────────────────────── */
 .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
@@ -555,6 +652,7 @@ tbody tr:hover td{background:var(--bg)}
 
   /* 2. Completely hide desktop chrome */
   .sidebar { display: none !important; }
+  .app-topbar { display: none !important; }
 
   /* 3. Force mobile chrome to span the full width */
   .mob-topbar { 
@@ -575,5 +673,10 @@ tbody tr:hover td{background:var(--bg)}
   
   .mob-page:not(.visible) { 
     display: none; 
+  }
+
+  .notification-dropdown{
+    width:min(92vw, 340px);
+    right:0;
   }
 }
