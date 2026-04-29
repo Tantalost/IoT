@@ -36,7 +36,11 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isDark, setIsDark] = useState<boolean>(() => localStorage.getItem('theme') === 'dark');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar_collapsed') === 'true');
-  const [phpRate] = useState<number>(12); // Kept in state for future settings panel
+  const [phpRate, setPhpRate] = useState<number>(12); // Global source of truth for all page cost calculations
+  const [isRateModalOpen, setIsRateModalOpen] = useState<boolean>(false);
+  const [rateInput, setRateInput] = useState<string>(String(12));
+  const [rateSaving, setRateSaving] = useState<boolean>(false);
+  const [rateError, setRateError] = useState<string>('');
   
   // 🚀 NEW: High consumption alert settings
   const [alertThreshold] = useState<number>(() => {
@@ -60,12 +64,6 @@ const App: React.FC = () => {
   const [isNotificationOpen, setIsNotificationOpen] = useState<boolean>(false);
   const [isBellFlash, setIsBellFlash] = useState<boolean>(false);
   const unreadCount = notifications.filter((item) => item.unread).length;
-  const tabLabelMap: Record<string, string> = {
-    dashboard: 'Energy Dashboard',
-    devices: 'Hardware Diagnostics',
-    analytics: 'Analytics',
-    history: 'History'
-  };
   const tabHeaderMap: Record<string, { title: string; subtitle: string }> = {
     dashboard: {
       title: 'Energy Operations Dashboard',
@@ -127,19 +125,7 @@ const App: React.FC = () => {
   }, [isDark, alertThreshold, alertsEnabled]); // Re-run when settings change
 
   useEffect(() => {
-    const syncRateToBackend = async () => {
-      try {
-        await fetch(`${API_BASE_URL}/api/settings/rate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phpRate })
-        });
-      } catch (error) {
-        console.error('Failed to sync rate to backend:', error);
-      }
-    };
-
-    syncRateToBackend();
+    setRateInput(String(phpRate));
   }, [phpRate]);
 
   useEffect(() => {
@@ -191,6 +177,30 @@ const App: React.FC = () => {
     } catch (_error) {}
   };
 
+  const handleSaveRate = async () => {
+    const parsed = parseFloat(rateInput);
+    if (!isFinite(parsed) || parsed <= 0) {
+      setRateError('Enter a valid rate greater than 0');
+      return;
+    }
+    setRateSaving(true);
+    setRateError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/settings/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phpRate: parsed })
+      });
+      if (!res.ok) throw new Error('Server error');
+      setPhpRate(parsed);
+      setIsRateModalOpen(false);
+    } catch (_error) {
+      setRateError('Failed to save. Check server connection.');
+    } finally {
+      setRateSaving(false);
+    }
+  };
+
   return (
     <div className="app">
       {/* ── DESKTOP SIDEBAR ── */}
@@ -239,7 +249,29 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="sidebar-rate">
-              <div className="rate-row"><div className="rate-label">Electricity Rate</div></div>
+              <div className="rate-row">
+                <div className="rate-label">Electricity Rate</div>
+                {!isSidebarCollapsed && (
+                  <button
+                    onClick={() => {
+                      setRateInput(String(phpRate));
+                      setRateError('');
+                      setIsRateModalOpen(true);
+                    }}
+                    style={{
+                      fontSize: '10px',
+                      color: 'var(--text2)',
+                      background: 'transparent',
+                      border: '1px solid var(--border)',
+                      borderRadius: '6px',
+                      padding: '2px 8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
               <div className="rate-val">₱{phpRate.toFixed(2)} / kWh</div>
             </div>
           </div>
@@ -320,7 +352,7 @@ const App: React.FC = () => {
         <AppliancesPage liveData={liveData} history={history} phpRate={phpRate} apiBaseUrl={API_BASE_URL} />
       )}
       {activeTab === 'analytics' && (
-        <AnalyticsPage liveData={liveData} history={history} phpRate={phpRate} />
+        <AnalyticsPage liveData={liveData} history={history} phpRate={phpRate} apiBaseUrl={API_BASE_URL} />
       )}
       {activeTab === 'history' && (
         <HistoryPage history={history} phpRate={phpRate} apiBaseUrl={API_BASE_URL} />
@@ -338,6 +370,67 @@ const App: React.FC = () => {
         <button className={`mob-nav-btn ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>Analytics</span></button>
         <button className={`mob-nav-btn ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 3"/></svg><span>History</span></button>
       </nav>
+
+      {isRateModalOpen && (
+        <div className="overlay open" style={{ alignItems: 'center', zIndex: 300 }}>
+          <div className="modal" style={{ maxWidth: '420px', borderRadius: '16px' }}>
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '4px' }}>Update Electricity Rate</div>
+              <div style={{ fontSize: '12px', color: 'var(--text3)' }}>Set the rate used across Dashboard, Appliances, Analytics, and History.</div>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '11px', color: 'var(--text3)', marginBottom: '6px' }}>Rate (₱/kWh)</label>
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: 'var(--text3)' }}>₱</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={rateInput}
+                  onChange={(e) => {
+                    setRateInput(e.target.value);
+                    setRateError('');
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveRate()}
+                  style={{
+                    width: '100%',
+                    background: 'var(--bg)',
+                    border: `1px solid ${rateError ? '#f87171' : 'var(--border)'}`,
+                    borderRadius: '10px',
+                    color: 'var(--text)',
+                    fontSize: '14px',
+                    padding: '10px 12px 10px 28px',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+              {rateError && <div style={{ marginTop: '6px', fontSize: '11px', color: '#f87171' }}>{rateError}</div>}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  setIsRateModalOpen(false);
+                  setRateError('');
+                  setRateInput(String(phpRate));
+                }}
+                disabled={rateSaving}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveRate}
+                disabled={rateSaving}
+              >
+                {rateSaving ? 'Saving…' : 'Save Rate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

@@ -258,17 +258,6 @@ app.post('/api/energy', async (req, res) => {
       recent.push(voltage > 0 ? 1 : 0);
       while (recent.length > 20) recent.shift();
       nodeRecentConnectivity.set(nodeId, recent);
-      const uptime = recent.length > 0 ? (recent.reduce((sum, n) => sum + n, 0) / recent.length) * 100 : 100;
-
-      if (uptime < 50 && canEmitNotification(`uptime:${nodeId}`, nowMs)) {
-        createNotification({
-          severity: 'critical',
-          title: `Uptime drop - Node ${nodeId}`,
-          body: `Connection uptime is ${Math.round(uptime)}% in recent samples`,
-          node: nodeId,
-          timestamp: new Date(nowMs).toISOString()
-        });
-      }
 
       // Resolved: reconnection after long gap.
       const previousSeen = nodeLastSeen.get(nodeId);
@@ -346,13 +335,6 @@ app.post('/api/notifications/mark-read', (_req, res) => {
 app.post('/api/notifications/simulate', (_req, res) => {
   const now = Date.now();
   const simulated = [
-    createNotification({
-      severity: 'critical',
-      title: 'Critical - Uptime drop Node 1',
-      body: 'Connection uptime fell below 50%',
-      node: 1,
-      timestamp: new Date(now - 4 * 60 * 1000).toISOString()
-    }),
     createNotification({
       severity: 'warning',
       title: 'Warning - Peak draw spike Node 2',

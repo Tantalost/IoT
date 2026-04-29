@@ -35,7 +35,6 @@ interface ApplianceRecord {
 
 const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate, apiBaseUrl }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 1024);
-  const UPTIME_WARNING_THRESHOLD = 50;
   const NOISE_FLOOR_WATTS = 3.0;
   const cleanNodes = useMemo(() => (
     (liveData?.nodes || []).map(node => ({
