@@ -182,8 +182,17 @@ async function endApplianceSession(node, timestampMs) {
   const powerSum = session.powerSum + finalPower;
   const avgPower = sampleCount > 0 ? powerSum / sampleCount : 0;
   const peakPower = Math.max(session.peakPower, finalPower);
-  const energyUsed = Math.max(finalEnergy - session.startEnergy, 0);
+  const rawEnergyUsed = finalEnergy - session.startEnergy;
+  const energyUsed = rawEnergyUsed < 0 ? 0 : rawEnergyUsed;
+  const dataReliable = rawEnergyUsed >= 0;
   const estimatedCost = energyUsed * currentRatePerKwh;
+
+  if (!dataReliable) {
+    console.warn(
+      `⚠️ Session ${session.id} on outlet ${outletId}: negative energy delta detected (${rawEnergyUsed.toFixed(6)} kWh). ` +
+      'Likely ESP32/PZEM counter reset; clamped to 0 and flagged as unreliable.'
+    );
+  }
 
   const { error } = await supabase
     .from('appliance_sessions')

@@ -1237,16 +1237,16 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
           <div className="chart-card" style={{ background: '#161820', border: '1px solid #2a2d3a', borderRadius: '12px', boxShadow: 'none', padding: '16px' }}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '10px', fontWeight: 500, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '1px' }}>Efficiency Rankings</h3>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '10px', fontWeight: 500, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '1px' }}>Consumption Health Score</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {efficiencyRankings.length === 0 ? (
-                <div style={{ fontSize: '12px', color: '#6b7080' }}>No active appliances to rank</div>
+                <div style={{ fontSize: '12px', color: '#6b7080' }}>No active appliances to score</div>
               ) : (
                 efficiencyRankings.map((ranking, idx) => (
                   <div key={idx} style={{ background: '#0f1117', border: '1px solid #2a2d3a', borderRadius: '10px', padding: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                       <span style={{ fontSize: '12px', color: '#fff' }}>{ranking.name}</span>
-                      <span style={{ fontSize: '12px', color: ranking.efficiency >= 90 ? '#4ade80' : ranking.efficiency >= 70 ? '#fbbf24' : '#f87171' }}>{ranking.efficiency}%</span>
+                      <span style={{ fontSize: '12px', color: ranking.efficiency >= 90 ? '#4ade80' : ranking.efficiency >= 70 ? '#fbbf24' : '#f87171' }}>{ranking.efficiency}% score</span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', fontSize: '11px', color: '#6b7080' }}>
                       <span>{ranking.currentPower.toFixed(0)}W</span>
