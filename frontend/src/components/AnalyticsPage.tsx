@@ -102,7 +102,8 @@ const APPLIANCE_WATTAGE_STANDARDS: Record<string, ApplianceStandard> = {
   fridge: { label: 'Refrigerator', watts: 200 },
   rice: { label: 'Rice Cooker', watts: 700 },
   washer: { label: 'Washing Machine', watts: 500 },
-  light: { label: 'Light Bulb', watts: 12 }
+  light: { label: 'Light Bulb', watts: 12 },
+  default: { label: 'Generic Device', watts: 1000 }
 };
 
 const APPLIANCE_TYPE_ALIASES: Record<string, string> = {
@@ -111,7 +112,8 @@ const APPLIANCE_TYPE_ALIASES: Record<string, string> = {
   fridge: 'refrigerator',
   rice: 'rice_cooker',
   washer: 'washing_machine',
-  light: 'light_bulb'
+  light: 'light_bulb',
+  generic: 'default'
 };
 
 const ANALYTICS_APPLIANCE_TYPE_MAP: Record<string, keyof typeof APPLIANCE_DATA> = {
@@ -131,6 +133,26 @@ const ANALYTICS_APPLIANCE_TYPE_MAP: Record<string, keyof typeof APPLIANCE_DATA> 
   air_conditioner: 'aircon',
   washer: 'washer',
   washing_machine: 'washer'
+};
+
+const resolveAnalyticsType = (normalizedType: string): keyof typeof APPLIANCE_DATA => {
+  const direct = ANALYTICS_APPLIANCE_TYPE_MAP[normalizedType];
+  if (direct) return direct;
+
+  const standardFromType = APPLIANCE_WATTAGE_STANDARDS[normalizedType]?.watts;
+  if (!standardFromType) return 'charger';
+
+  const closest = (Object.entries(APPLIANCE_DATA) as Array<[keyof typeof APPLIANCE_DATA, typeof APPLIANCE_DATA[keyof typeof APPLIANCE_DATA]]>)
+    .reduce(
+      (best, [key, value]) => {
+        const diff = Math.abs(value.standard - standardFromType);
+        if (diff < best.diff) return { key, diff };
+        return best;
+      },
+      { key: 'charger' as keyof typeof APPLIANCE_DATA, diff: Number.POSITIVE_INFINITY }
+    );
+
+  return closest.key;
 };
 
 const APPLIANCE_SPECS: Record<string, { expectedWatts: number, icon: string }> = {
@@ -227,9 +249,11 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
   });
 
   const NOISE_FLOOR_WATTS = 3.0;
+  const MIN_ACTIVE_VOLTAGE = 1.0;
   const cleanNodes = (liveData?.nodes || []).map(node => ({
     ...node,
-    power: node.power < NOISE_FLOOR_WATTS ? 0 : node.power
+    power: node.voltage <= MIN_ACTIVE_VOLTAGE || node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
+    current: node.voltage <= MIN_ACTIVE_VOLTAGE || node.power < NOISE_FLOOR_WATTS ? 0 : node.current
   }));
 
   useEffect(() => {
@@ -485,8 +509,7 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
       const configuredType = configuredNodes[node.id]?.type;
       if (!configuredType) return null;
       const normalizedType = APPLIANCE_TYPE_ALIASES[configuredType] || configuredType;
-      const mappedType = ANALYTICS_APPLIANCE_TYPE_MAP[normalizedType];
-      if (!mappedType) return null;
+      const mappedType = resolveAnalyticsType(normalizedType);
       return {
         nodeId: node.id,
         nodeName: configuredNodes[node.id]?.name || `Node ${node.id}`,
@@ -556,7 +579,7 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
         label: 'Node 1 (W)',
         data: history.map(h => {
           const n = h.nodes.find(x => x.id === 1);
-          return n && n.power > NOISE_FLOOR_WATTS ? n.power : 0;
+          return n && n.voltage > MIN_ACTIVE_VOLTAGE && n.power > NOISE_FLOOR_WATTS ? n.power : 0;
         }),
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59,130,246,0.15)',
@@ -569,7 +592,7 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
         label: 'Node 2 (W)',
         data: history.map(h => {
           const n = h.nodes.find(x => x.id === 2);
-          return n && n.power > NOISE_FLOOR_WATTS ? n.power : 0;
+          return n && n.voltage > MIN_ACTIVE_VOLTAGE && n.power > NOISE_FLOOR_WATTS ? n.power : 0;
         }),
         borderColor: '#4ade80',
         backgroundColor: 'rgba(74,222,128,0.10)',
@@ -716,6 +739,34 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
     insights.push({ title: 'System Idle', text: 'All monitored outlets are currently empty or devices are completely powered off. Excellent energy conservation!', type: 'success', icon: '💤' });
   } else {
     activeNodes.forEach(node => {
+      const configured = configuredNodes[node.id];
+      const configuredType = configured?.type ? (APPLIANCE_TYPE_ALIASES[configured.type] || configured.type) : null;
+      const configuredSpec = configuredType ? (APPLIANCE_SPECS[configuredType] || APPLIANCE_SPECS.default) : null;
+
+      if (configured && configuredSpec) {
+        const baseline = configuredSpec.expectedWatts;
+        if (node.power > baseline * 1.25) {
+          insights.push({
+            title: `Inefficient Draw: ${configured.name}`,
+            text: `Pulling ${node.power.toFixed(0)}W, which is significantly higher than the typical ${baseline}W for this category. Check the appliance for dirty filters, failing motors, or faults.`,
+            type: 'warning', icon: '⚠️'
+          });
+        } else if (node.power >= baseline * 0.75 && node.power <= baseline * 1.25) {
+          insights.push({
+            title: `Healthy Operation: ${configured.name}`,
+            text: `Running at ${node.power.toFixed(0)}W, which perfectly matches the optimal baseline for this category.`,
+            type: 'success', icon: '✅'
+          });
+        } else {
+          insights.push({
+            title: `Eco/Standby Mode: ${configured.name}`,
+            text: `Drawing only ${node.power.toFixed(0)}W. It is operating below standard capacity or resting in standby mode.`,
+            type: 'info', icon: '🔋'
+          });
+        }
+        return;
+      }
+
       const matchedDevice = deviceMemory.find(memory => {
         const difference = Math.abs(memory.expectedPower - node.power);
         const tolerance = Math.max(15, memory.expectedPower * 0.15); // 15% tolerance
@@ -723,7 +774,7 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
       });
 
       if (matchedDevice) {
-        const spec = APPLIANCE_SPECS[matchedDevice.type] || APPLIANCE_SPECS.default;
+        const spec = APPLIANCE_SPECS[APPLIANCE_TYPE_ALIASES[matchedDevice.type] || matchedDevice.type] || APPLIANCE_SPECS.default;
         const baseline = spec.expectedWatts;
         
         if (node.power > baseline * 1.25) {

@@ -36,11 +36,12 @@ interface ApplianceRecord {
 const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate, apiBaseUrl }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 1024);
   const NOISE_FLOOR_WATTS = 3.0;
+  const MIN_ACTIVE_VOLTAGE = 1.0;
   const cleanNodes = useMemo(() => (
     (liveData?.nodes || []).map(node => ({
       ...node,
-      power: node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
-      current: node.power < NOISE_FLOOR_WATTS ? 0 : node.current
+      power: node.voltage <= MIN_ACTIVE_VOLTAGE || node.power < NOISE_FLOOR_WATTS ? 0 : node.power,
+      current: node.voltage <= MIN_ACTIVE_VOLTAGE || node.power < NOISE_FLOOR_WATTS ? 0 : node.current
     }))
   ), [liveData]);
 
@@ -241,7 +242,12 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
     return [1, 2].map(nodeId => {
       const nodeSamples = history
         .slice(-30)
-        .map(item => (item.nodes || []).find(n => n.id === nodeId)?.power ?? 0);
+        .map(item => {
+          const reading = (item.nodes || []).find(n => n.id === nodeId);
+          if (!reading) return 0;
+          if ((reading.voltage || 0) <= MIN_ACTIVE_VOLTAGE) return 0;
+          return (reading.power || 0) < NOISE_FLOOR_WATTS ? 0 : (reading.power || 0);
+        });
       const avgPower = nodeSamples.length
         ? nodeSamples.reduce((sum, power) => sum + power, 0) / nodeSamples.length
         : 0;
