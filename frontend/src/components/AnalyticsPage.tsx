@@ -537,7 +537,11 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
     return undefined;
   }, [selectedComparisonNodeId]);
 
-  const totalKwh = node1.energy + node2.energy; 
+  const hasActiveLoad = activeNodes.length > 0;
+  const lastSessionTotalKwh = node1.energy + node2.energy;
+  const displayNode1Energy = hasActiveLoad ? node1.energy : 0;
+  const displayNode2Energy = hasActiveLoad ? node2.energy : 0;
+  const totalKwh = displayNode1Energy + displayNode2Energy; 
   const currentCost = totalKwh * phpRate;
   const estimatedDaily = currentCost > 0 ? currentCost * 4 : 0; 
   const estimatedMonthly = estimatedDaily * 30;
@@ -545,7 +549,7 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
   const distributionData = {
     labels: ['Sensor Node 1', 'Sensor Node 2'],
     datasets: [{
-      data: [node1.energy, node2.energy],
+      data: [displayNode1Energy, displayNode2Energy],
       backgroundColor: ['rgba(59,130,246,0.45)', 'rgba(74,222,128,0.28)'],
       borderColor: ['#3b82f6', '#4ade80'],
       borderWidth: 1,
@@ -1223,6 +1227,11 @@ const AnalyticsPage: React.FC<AnalyticsProps> = ({ liveData, history, phpRate, a
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
               <div style={{ fontSize: '24px', fontWeight: 600, color: '#fff' }}>{totalKwh.toFixed(3)}</div>
               <div style={{ fontSize: '12px', color: '#6b7080' }}>kWh</div>
+              {!hasActiveLoad && (
+                <div style={{ fontSize: '10px', color: '#6b7080', marginTop: '6px' }}>
+                  Last session: {lastSessionTotalKwh.toFixed(3)} kWh
+                </div>
+              )}
             </div>
           </div>
         </div>
