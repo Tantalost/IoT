@@ -3,12 +3,15 @@
 #include <ArduinoJson.h>
 #include <PZEM004Tv30.h>
 #include <HardwareSerial.h>
+#include <WiFiClientSecure.h>
+
+WiFiClientSecure client;
 
 // Enter your Wi-Fi credentials
 const char* ssid = "TANTALOS 2489";
 const char* password = "]r06019G";
 
-const char* serverName = "http://192.168.137.1:3000/api/energy"; 
+const char* serverName = "https://iot-backend-1ptq.onrender.com/api/energy";
 
 // PZEM 1 Pins (Using Hardware Serial 2)
 #define PZEM1_RX_PIN 26
@@ -26,6 +29,7 @@ unsigned long timerDelay = 2000; // Send data every 2 seconds
 
 void setup() {
   Serial.begin(115200);
+  client.setInsecure();
 
   // Connect to Wi-Fi
   WiFi.begin(ssid, password);
@@ -62,7 +66,7 @@ void loop() {
       }
 
       HTTPClient http;
-      http.begin(serverName);
+      http.begin(client, serverName);
       http.addHeader("Content-Type", "application/json");
 
       StaticJsonDocument<512> doc;      
