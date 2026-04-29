@@ -48,24 +48,26 @@ void loop() {
       float c1 = pzem1.current();
       float p1 = pzem1.power();
       float e1 = pzem1.energy();
-
-      // Read Sensor 2
+      if (!isnan(p1) && p1 < 3.0) {
+        p1 = 0.0;
+        c1 = 0.0;
+      }
       float v2 = pzem2.voltage();
       float c2 = pzem2.current();
       float p2 = pzem2.power();
       float e2 = pzem2.energy();
+      if (!isnan(p2) && p2 < 3.0) {
+        p2 = 0.0;
+        c2 = 0.0;
+      }
 
       HTTPClient http;
       http.begin(serverName);
       http.addHeader("Content-Type", "application/json");
 
-      // Create a larger JSON document to hold the array (512 bytes is plenty)
-      StaticJsonDocument<512> doc;
-      
-      // Create the "nodes" array
+      StaticJsonDocument<512> doc;      
       JsonArray nodes = doc.createNestedArray("nodes");
 
-      // --- Append Node 1 Data ---
       JsonObject node1 = nodes.createNestedObject();
       node1["id"] = 1;
       // If sensor is unplugged from AC, isnan() prevents it from sending "null" strings
@@ -94,11 +96,10 @@ void loop() {
       } else {
         Serial.print("❌ HTTP Request failed. Error code: ");
         Serial.println(httpResponseCode);
-        // THIS IS THE NEW LOG: It will tell us exactly why it failed!
         Serial.println("Error details: " + http.errorToString(httpResponseCode)); 
       }
 
-      http.end(); // Free resources
+      http.end();
       
     } else {
       Serial.println("Wi-Fi Disconnected");
