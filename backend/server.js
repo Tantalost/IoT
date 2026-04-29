@@ -556,7 +556,7 @@ app.post('/api/diagnostics', async (req, res) => {
   }
 });
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Real-Time Server actively listening on port ${PORT}...`);
 });

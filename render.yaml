@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: iot-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm run start
+    plan: free
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: DEFAULT_RATE_PER_KWH
+        value: "12"
+      - key: POWER_SPIKE_THRESHOLD_WATTS
+        value: "50"
