@@ -523,7 +523,7 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
     labels: cleanNodes.map(node => configuredNodes[node.id]?.name || `Outlet ${node.id}`),
     datasets: [{
       data: cleanNodes.map(node => node.power || 0),
-      backgroundColor: ['#16a34a', '#22c55e', '#86efac', '#bbf7d0'],
+      backgroundColor: ['#16a34a', '#3b82f6', '#86efac', '#93c5fd'],
       borderColor: 'rgba(255,255,255,0.9)',
       borderWidth: 2
     }]
