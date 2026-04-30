@@ -51,7 +51,7 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
     }))
   ), [liveData]);
 
-  const [diagnostics, setDiagnostics] = useState<Record<number, NodeDiagnostics>>(() => {
+  const [, setDiagnostics] = useState<Record<number, NodeDiagnostics>>(() => {
     const initial: Record<number, NodeDiagnostics> = {
       1: {
         nodeId: 1,
@@ -274,12 +274,13 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
     const gap = watts - range.maxWatts;
     return Math.max(0, 100 - (gap / Math.max(range.maxWatts, 1)) * 100);
   };
-  const overallUptime = Math.round(
-    (Object.values(diagnostics).reduce((sum, metric) => sum + metric.connectionUptime, 0) /
-      Math.max(Object.keys(diagnostics).length, 1))
-  );
   const nodeConsumptionSummary = useMemo(() => {
     return [1, 2].map(nodeId => {
+      const currentNode = cleanNodes.find(n => n.id === nodeId) || { id: nodeId, voltage: 0, current: 0, power: 0, energy: 0 };
+      const currentPower = currentNode.power || 0;
+      const range = getRangeForAppliance(nodeIdentity[nodeId]?.appliance || 'default', nodeIdentity[nodeId]?.applianceType);
+      const activePowerFloor = Math.max(NOISE_FLOOR_WATTS, range.minWatts * 0.75);
+      const isCurrentlyActive = currentNode.voltage > MIN_ACTIVE_VOLTAGE && currentPower >= activePowerFloor;
       const nodeSamples = history
         .slice(-30)
         .map(item => {
@@ -288,23 +289,22 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
           if ((reading.voltage || 0) <= MIN_ACTIVE_VOLTAGE) return 0;
           return (reading.power || 0) < NOISE_FLOOR_WATTS ? 0 : (reading.power || 0);
         });
-      const avgPower = nodeSamples.length
-        ? nodeSamples.reduce((sum, power) => sum + power, 0) / nodeSamples.length
-        : 0;
+      const activeSamples = nodeSamples.filter(power => power >= NOISE_FLOOR_WATTS);
+      const avgPower = activeSamples.length
+        ? activeSamples.reduce((sum, power) => sum + power, 0) / activeSamples.length
+        : currentPower;
+      const healthScore = !isCurrentlyActive ? 100 : rangeHealthScore(avgPower, range);
 
       return {
         nodeId,
-        range: getRangeForAppliance(nodeIdentity[nodeId]?.appliance || 'default', nodeIdentity[nodeId]?.applianceType),
+        range,
         avgPower,
-        isHigh: !isWithinRange(avgPower, getRangeForAppliance(nodeIdentity[nodeId]?.appliance || 'default', nodeIdentity[nodeId]?.applianceType)),
-        healthScore: rangeHealthScore(avgPower, getRangeForAppliance(nodeIdentity[nodeId]?.appliance || 'default', nodeIdentity[nodeId]?.applianceType))
+        isHigh: isCurrentlyActive && !isWithinRange(avgPower, range),
+        healthScore
       };
     });
   }, [history, nodeIdentity]);
   const highConsumptionCount = nodeConsumptionSummary.filter(node => node.isHigh).length;
-  const overallConsumptionHealth = Math.round(
-    ((Math.max(nodeConsumptionSummary.length - highConsumptionCount, 0)) / Math.max(nodeConsumptionSummary.length, 1)) * 100
-  );
   const hasHighConsumption = highConsumptionCount > 0;
 
   const SensorCard = ({ node }: { node: EnergyNode }) => {
@@ -427,46 +427,6 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
     }}>
       {/* 🚀 Changed maxWidth to 1440px to cover the screen beautifully */}
       <div style={{ width: '100%', maxWidth: '1440px' }}>
-
-        <div style={{ marginBottom: '18px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '10px' }}>
-            <div>
-              <div style={{ color: 'var(--text2)', fontSize: '13px', fontWeight: 600 }}>APPLIANCE CONSUMPTION HEALTH</div>
-              <div style={{ fontSize: '24px', color: overallConsumptionHealth >= 80 ? '#10b981' : overallConsumptionHealth >= 50 ? '#f59e0b' : '#ef4444', fontWeight: 700 }}>
-                {overallConsumptionHealth}% <span style={{ fontSize: '14px', color: 'var(--text3)' }}>within appliance range</span>
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '4px' }}>
-                Sensor feed uptime: {overallUptime}%
-              </div>
-            </div>
-            <div style={{
-              background: hasHighConsumption ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)',
-              color: hasHighConsumption ? '#ef4444' : '#10b981',
-              border: `1px solid ${hasHighConsumption ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
-              borderRadius: '999px',
-              padding: '6px 12px',
-              fontSize: '12px',
-              fontWeight: 700
-            }}>
-              {hasHighConsumption ? 'Warning: High Consumption' : 'Usage in Normal Range'}
-            </div>
-          </div>
-
-          {/* Top-level per-node usage health cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
-            {nodeConsumptionSummary.map(node => (
-              <div key={node.nodeId} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px' }}>
-                <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '4px' }}>Node {node.nodeId}</div>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: node.isHigh ? '#ef4444' : '#10b981' }}>
-                    Avg {node.avgPower.toFixed(1)}W
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '2px' }}>
-                    {node.isHigh ? `Outside ${formatRange(node.range)} range` : `Within ${formatRange(node.range)} range`}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
 
         {hasHighConsumption && (
           <div style={{
