@@ -212,26 +212,36 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
   const node2 = cleanNodes.find(n => n.id === 2) || { id: 2, voltage: 0, current: 0, power: 0, energy: 0 };
   const totalPower = cleanNodes.reduce((sum, node) => sum + (node.power || 0), 0);
   const totalEnergy = cleanNodes.reduce((sum, node) => sum + (node.energy || 0), 0);
-  // Per-appliance baseline thresholds so "high consumption" is contextual.
+  // Device-specific baseline thresholds so "high consumption" follows the selected appliance.
   const applianceThresholds: Record<string, number> = {
     'phone charger': 30,
-    'laptop charger': 120,
-    'desktop pc': 500,
-    television: 220,
-    'electric fan': 120,
+    'laptop charger': 90,
+    charger: 30,
+    'usb charger': 30,
+    'led bulb': 18,
+    'led light': 18,
+    light: 18,
+    fan: 70,
+    'electric fan': 70,
+    refrigerator: 175,
+    fridge: 175,
     'air conditioner': 1500,
-    refrigerator: 350,
-    microwave: 1400,
+    ac: 1500,
+    television: 150,
+    tv: 150,
+    desktop: 500,
+    'desktop pc': 500,
+    microwave: 1200,
     'rice cooker': 900,
     'coffee maker': 1200,
     'washing machine': 1000,
     'hair dryer': 1500,
     'clothes iron': 1300,
-    'led light': 25,
-    default: 250
+    default: 100
   };
+  const normalizeApplianceKey = (applianceName: string) => applianceName.trim().toLowerCase().replace(/[_-]+/g, ' ');
   const getThresholdForAppliance = (applianceName: string) => {
-    const key = applianceName.trim().toLowerCase();
+    const key = normalizeApplianceKey(applianceName);
     return applianceThresholds[key] ?? applianceThresholds.default;
   };
   const overallUptime = Math.round(

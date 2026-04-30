@@ -111,9 +111,14 @@ const App: React.FC = () => {
     socket.on('live_power_reading', (data: EnergyData) => {
       console.log("📥 RECEIVED LIVE DATA FROM BACKEND:", data); 
       
-      setLiveData(data);
+      const timestampedData = {
+        ...data,
+        timestamp: data.timestamp || new Date().toISOString()
+      };
+
+      setLiveData(timestampedData);
       setHistory((prev) => {
-        const updated = [...prev, data];
+        const updated = [...prev, timestampedData];
         if (updated.length > 20) updated.shift();
         return updated;
       });

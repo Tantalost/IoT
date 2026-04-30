@@ -448,14 +448,20 @@ const WattWatchDashboard: React.FC<DashboardProps> = ({ liveData, history, phpRa
 
   const now = Date.now();
   const timeRangeMs = powerTimeRange === '1h' ? 60 * 60 * 1000 : powerTimeRange === '24h' ? 24 * 60 * 60 * 1000 : null;
-  const timeFilteredHistory = (history || []).filter((item, index, arr) => {
+  const sortedHistory = [...(history || [])].sort((a, b) => {
+    const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return aTime - bTime;
+  });
+
+  const timeFilteredHistory = sortedHistory.filter((item, index, arr) => {
     if (powerTimeRange === 'live') {
       return index >= Math.max(arr.length - 24, 0);
     }
     const ts = item.timestamp ? new Date(item.timestamp).getTime() : 0;
-    return ts > 0 && ts >= now - (timeRangeMs || 0);
+    return ts > 0 && timeRangeMs !== null && ts >= now - timeRangeMs;
   });
-  const plottedHistory = timeFilteredHistory.length > 0 ? timeFilteredHistory : history;
+  const plottedHistory = timeFilteredHistory;
   const nodeIds = Array.from(new Set(cleanNodes.map(n => n.id).concat([1, 2]))).sort((a, b) => a - b);
   const nodeLineColors = ['#16a34a', '#3b82f6', '#f59e0b', '#ef4444'];
 
