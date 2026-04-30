@@ -33,6 +33,12 @@ interface ApplianceRecord {
   created_at?: string;
 }
 
+interface ApplianceIdentity {
+  outletName: string;
+  appliance: string;
+  applianceType?: string;
+}
+
 const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate, apiBaseUrl }) => {
   const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth <= 1024);
   const NOISE_FLOOR_WATTS = 3.0;
@@ -70,7 +76,7 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
     };
     return initial;
   });
-  const [nodeIdentity, setNodeIdentity] = useState<Record<number, { outletName: string; appliance: string }>>({});
+  const [nodeIdentity, setNodeIdentity] = useState<Record<number, ApplianceIdentity>>({});
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 1024);
@@ -90,13 +96,14 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
       try {
         const saved = localStorage.getItem('wattwatch_dashboard_nodes');
         const parsed = saved ? JSON.parse(saved) : {};
-        const fallback: Record<number, { outletName: string; appliance: string }> = {};
+        const fallback: Record<number, ApplianceIdentity> = {};
         Object.entries(parsed).forEach(([nodeId, config]) => {
           const id = Number(nodeId);
           const entry = config as { name?: string; type?: string };
           fallback[id] = {
             outletName: entry?.name || `Outlet ${id}`,
-            appliance: formatTypeLabel(entry?.type || '')
+            appliance: formatTypeLabel(entry?.type || ''),
+            applianceType: entry?.type || ''
           };
         });
         setNodeIdentity(fallback);
@@ -127,12 +134,13 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
           if (currentTime > existingTime) latestByOutlet[item.outlet_id] = item;
         });
 
-        const mapped: Record<number, { outletName: string; appliance: string }> = {};
+        const mapped: Record<number, ApplianceIdentity> = {};
         Object.entries(latestByOutlet).forEach(([outletId, item]) => {
           const id = Number(outletId);
           mapped[id] = {
             outletName: item.appliance_name || `Outlet ${id}`,
-            appliance: formatTypeLabel(item.appliance_type || '')
+            appliance: formatTypeLabel(item.appliance_type || ''),
+            applianceType: item.appliance_type || ''
           };
         });
 
@@ -213,36 +221,58 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
   const totalPower = cleanNodes.reduce((sum, node) => sum + (node.power || 0), 0);
   const totalEnergy = cleanNodes.reduce((sum, node) => sum + (node.energy || 0), 0);
   // Device-specific baseline thresholds so "high consumption" follows the selected appliance.
-  const applianceThresholds: Record<string, number> = {
-    'phone charger': 30,
-    'laptop charger': 90,
-    charger: 30,
-    'usb charger': 30,
-    'led bulb': 18,
-    'led light': 18,
-    light: 18,
-    fan: 70,
-    'electric fan': 70,
-    refrigerator: 175,
-    fridge: 175,
-    'air conditioner': 1500,
-    ac: 1500,
-    television: 150,
-    tv: 150,
-    desktop: 500,
-    'desktop pc': 500,
-    microwave: 1200,
-    'rice cooker': 900,
-    'coffee maker': 1200,
-    'washing machine': 1000,
-    'hair dryer': 1500,
-    'clothes iron': 1300,
-    default: 100
+  const applianceConsumptionRanges: Record<string, { minWatts: number; maxWatts: number }> = {
+    phone: { minWatts: 5, maxWatts: 20 },
+    charger: { minWatts: 5, maxWatts: 30 },
+    laptop: { minWatts: 45, maxWatts: 100 },
+    desktop: { minWatts: 100, maxWatts: 500 },
+    tv: { minWatts: 60, maxWatts: 150 },
+    fan: { minWatts: 40, maxWatts: 80 },
+    ac: { minWatts: 900, maxWatts: 1500 },
+    fridge: { minWatts: 150, maxWatts: 200 },
+    microwave: { minWatts: 700, maxWatts: 1200 },
+    rice: { minWatts: 400, maxWatts: 900 },
+    coffee: { minWatts: 500, maxWatts: 1200 },
+    washer: { minWatts: 400, maxWatts: 1000 },
+    hairdryer: { minWatts: 800, maxWatts: 1500 },
+    iron: { minWatts: 700, maxWatts: 1300 },
+    light: { minWatts: 15, maxWatts: 20 },
+    default: { minWatts: 20, maxWatts: 100 }
   };
   const normalizeApplianceKey = (applianceName: string) => applianceName.trim().toLowerCase().replace(/[_-]+/g, ' ');
-  const getThresholdForAppliance = (applianceName: string) => {
-    const key = normalizeApplianceKey(applianceName);
-    return applianceThresholds[key] ?? applianceThresholds.default;
+  const getRangeForAppliance = (applianceName: string, applianceType?: string) => {
+    const typeKey = normalizeApplianceKey(applianceType || '');
+    if (typeKey && applianceConsumptionRanges[typeKey]) return applianceConsumptionRanges[typeKey];
+
+    const nameKey = normalizeApplianceKey(applianceName);
+    if (nameKey.includes('laptop')) return applianceConsumptionRanges.laptop;
+    if (nameKey.includes('phone')) return applianceConsumptionRanges.phone;
+    if (nameKey.includes('charger')) return applianceConsumptionRanges.charger;
+    if (nameKey.includes('fan')) return applianceConsumptionRanges.fan;
+    if (nameKey.includes('fridge')) return applianceConsumptionRanges.fridge;
+    if (nameKey.includes('ac')) return applianceConsumptionRanges.ac;
+    if (nameKey.includes('tv')) return applianceConsumptionRanges.tv;
+    if (nameKey.includes('desktop')) return applianceConsumptionRanges.desktop;
+    if (nameKey.includes('microwave')) return applianceConsumptionRanges.microwave;
+    if (nameKey.includes('rice')) return applianceConsumptionRanges.rice;
+    if (nameKey.includes('coffee')) return applianceConsumptionRanges.coffee;
+    if (nameKey.includes('washer')) return applianceConsumptionRanges.washer;
+    if (nameKey.includes('hair')) return applianceConsumptionRanges.hairdryer;
+    if (nameKey.includes('iron')) return applianceConsumptionRanges.iron;
+    if (nameKey.includes('light')) return applianceConsumptionRanges.light;
+
+    return applianceConsumptionRanges.default;
+  };
+  const formatRange = (range: { minWatts: number; maxWatts: number }) => `${range.minWatts}-${range.maxWatts}W`;
+  const isWithinRange = (watts: number, range: { minWatts: number; maxWatts: number }) => watts >= range.minWatts && watts <= range.maxWatts;
+  const rangeHealthScore = (watts: number, range: { minWatts: number; maxWatts: number }) => {
+    if (isWithinRange(watts, range)) return 100;
+    if (watts < range.minWatts) {
+      const gap = range.minWatts - watts;
+      return Math.max(0, 100 - (gap / Math.max(range.minWatts, 1)) * 100);
+    }
+    const gap = watts - range.maxWatts;
+    return Math.max(0, 100 - (gap / Math.max(range.maxWatts, 1)) * 100);
   };
   const overallUptime = Math.round(
     (Object.values(diagnostics).reduce((sum, metric) => sum + metric.connectionUptime, 0) /
@@ -264,9 +294,10 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
 
       return {
         nodeId,
-        threshold: getThresholdForAppliance(nodeIdentity[nodeId]?.appliance || 'default'),
+        range: getRangeForAppliance(nodeIdentity[nodeId]?.appliance || 'default', nodeIdentity[nodeId]?.applianceType),
         avgPower,
-        isHigh: avgPower >= getThresholdForAppliance(nodeIdentity[nodeId]?.appliance || 'default')
+        isHigh: !isWithinRange(avgPower, getRangeForAppliance(nodeIdentity[nodeId]?.appliance || 'default', nodeIdentity[nodeId]?.applianceType)),
+        healthScore: rangeHealthScore(avgPower, getRangeForAppliance(nodeIdentity[nodeId]?.appliance || 'default', nodeIdentity[nodeId]?.applianceType))
       };
     });
   }, [history, nodeIdentity]);
@@ -280,10 +311,11 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
     const identity = nodeIdentity[node.id] || { outletName: `Outlet ${node.id}`, appliance: 'Unidentified appliance' };
     const isActive = node.power > 0;
     // Per-node pricing + consumption context.
-    const nodeThreshold = getThresholdForAppliance(identity.appliance || 'default');
+    const nodeRange = getRangeForAppliance(identity.appliance || 'default', identity.applianceType);
     const costPerHour = (node.power / 1000) * phpRate;
     const estimatedDailyCost = costPerHour * 24;
-    const consumptionVsTarget = nodeThreshold > 0 ? Math.min((node.power / nodeThreshold) * 100, 999) : 0;
+    const consumptionVsTarget = rangeHealthScore(node.power, nodeRange);
+    const inRange = isWithinRange(node.power, nodeRange);
     const recentNodeSamples = history
       .slice(-6)
       .map(item => (item.nodes || []).find(n => n.id === node.id)?.power ?? 0);
@@ -358,11 +390,14 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
           <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border)' }}>
             <div style={{ color: 'var(--text3)', fontSize: '12px', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Power Consumption</div>
-            <div style={{ fontSize: '24px', lineHeight: 1.15, fontWeight: 700, color: consumptionVsTarget > 100 ? '#ef4444' : '#10b981' }}>
-              {consumptionVsTarget.toFixed(0)}% <span style={{ fontSize: '14px', color: 'var(--text2)' }}>of {nodeThreshold}W target</span>
+            <div style={{ fontSize: '24px', lineHeight: 1.15, fontWeight: 700, color: inRange ? '#10b981' : '#ef4444' }}>
+              {consumptionVsTarget.toFixed(0)}% <span style={{ fontSize: '14px', color: 'var(--text2)' }}>health</span>
             </div>
             <div style={{ marginTop: '4px', color: trendColor, fontSize: '12px', fontWeight: 600 }}>
               {trendArrow} {Math.abs(powerDelta).toFixed(1)}W vs previous sample
+            </div>
+            <div style={{ marginTop: '2px', color: 'var(--text3)', fontSize: '12px' }}>
+              Target range: {formatRange(nodeRange)} for {identity.appliance}
             </div>
           </div>
           <div style={{ background: 'var(--bg)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border)' }}>
@@ -398,7 +433,7 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
             <div>
               <div style={{ color: 'var(--text2)', fontSize: '13px', fontWeight: 600 }}>APPLIANCE CONSUMPTION HEALTH</div>
               <div style={{ fontSize: '24px', color: overallConsumptionHealth >= 80 ? '#10b981' : overallConsumptionHealth >= 50 ? '#f59e0b' : '#ef4444', fontWeight: 700 }}>
-                {overallConsumptionHealth}% <span style={{ fontSize: '14px', color: 'var(--text3)' }}>within target usage</span>
+                {overallConsumptionHealth}% <span style={{ fontSize: '14px', color: 'var(--text3)' }}>within appliance range</span>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '4px' }}>
                 Sensor feed uptime: {overallUptime}%
@@ -423,10 +458,10 @@ const AppliancesPage: React.FC<AppliancesProps> = ({ liveData, history, phpRate,
               <div key={node.nodeId} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px' }}>
                 <div style={{ color: 'var(--text2)', fontSize: '12px', marginBottom: '4px' }}>Node {node.nodeId}</div>
                 <div style={{ fontSize: '18px', fontWeight: 700, color: node.isHigh ? '#ef4444' : '#10b981' }}>
-                  Avg {node.avgPower.toFixed(1)}W
+                    Avg {node.avgPower.toFixed(1)}W
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text3)', marginTop: '2px' }}>
-                  {node.isHigh ? `Above ${node.threshold}W target` : `Within ${node.threshold}W target`}
+                    {node.isHigh ? `Outside ${formatRange(node.range)} range` : `Within ${formatRange(node.range)} range`}
                 </div>
               </div>
             ))}
